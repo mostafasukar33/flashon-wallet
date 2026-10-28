@@ -19,6 +19,7 @@ import java.util.Locale
 
 object Notifier {
     private const val CH = "limits"
+    private const val CH_TX = "tx"
 
     fun fmt(n: Double): String {
         val r = Math.round(n * 100) / 100.0
@@ -27,6 +28,11 @@ object Notifier {
 
     private fun channel(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel(CH_TX) == null) {
+            nm.createNotificationChannel(NotificationChannel(CH_TX, "العمليات", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "إشعار مع كل فلوس داخلة أو خارجة"
+            })
+        }
         if (nm.getNotificationChannel(CH) == null) {
             nm.createNotificationChannel(NotificationChannel(CH, "حدود المحافظ", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "تنبيهات حدود الاستلام والتحويل"
@@ -34,7 +40,7 @@ object Notifier {
         }
     }
 
-    fun post(ctx: Context, id: Int, title: String, text: String) {
+    fun post(ctx: Context, id: Int, title: String, text: String, ch: String = CH) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         channel(ctx)
@@ -42,7 +48,7 @@ object Notifier {
             ctx, 0, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val n = Notification.Builder(ctx, CH)
+        val n = Notification.Builder(ctx, ch)
             .setSmallIcon(R.drawable.ic_stat)
             .setColor(0xFF1E5AA8.toInt())
             .setContentTitle(title)
@@ -54,13 +60,42 @@ object Notifier {
         ctx.getSystemService(NotificationManager::class.java).notify(id, n)
     }
 
+    /** One notification for each new money message (ids = messages that just arrived). */
+    fun announce(ctx: Context, store: Store, ids: Collection<String>) {
+        if (!store.txNotify || ids.isEmpty()) return
+        val led = store.ledger()
+        for (p in led.all) {
+            if (p.sms.id !in ids) continue
+            val acc = led.account(p)
+            val label = led.accountLabel(acc)
+            val nid = 1000 + (p.sms.id.hashCode() and 0x7ffffff)
+            val a = p.amount ?: continue
+            when (p.type) {
+                com.flashon.wallet.core.TxType.IN -> {
+                    val who = led.displayName(p)?.let { " من $it" } ?: ""
+                    post(ctx, nid, "+${fmt(a)} ج$who",
+                        label + (p.balance?.let { " · الرصيد ${fmt(it)}" } ?: ""), CH_TX)
+                }
+                com.flashon.wallet.core.TxType.OUT -> {
+                    val who = led.displayName(p)?.let { " لـ $it" } ?: ""
+                    val fee = if (p.fee > 0) " + ${fmt(p.fee)} رسوم" else ""
+                    post(ctx, nid, "−${fmt(a)} ج$who",
+                        p.kind + fee + " · " + label + (p.balance?.let { " · الرصيد ${fmt(it)}" } ?: ""), CH_TX)
+                }
+                com.flashon.wallet.core.TxType.UNKNOWN ->
+                    post(ctx, nid, "رسالة مش مفهومة · $label", "فيها ${fmt(a)} ج. افتح التطبيق وحدد هي وارد ولا صادر.", CH_TX)
+                else -> {}
+            }
+        }
+    }
+
     /** Looks at the limits after a new message and warns once per month/day for each situation. */
     fun check(ctx: Context, store: Store = Store(ctx)) {
         val led = store.ledger()
-        val lim = store.limits()
         val month = YearMonth.now().toString()
         val day = LocalDate.now().toString()
         for ((idx, acc) in led.accounts.withIndex()) {
+            val lim = led.limitsFor(acc)
             val n = led.now(acc)
             if (!n.hasData) continue
             val label = led.accountLabel(acc)
@@ -124,8 +159,7 @@ object Notifier {
             val locked = led.lockedAtEndOf(prev, acc)
             if (locked > 0.5) parts += "${fmt(locked)} في ${led.accountLabel(acc)}"
         }
-        val lim = store.limits()
-        val text = if (parts.isEmpty()) "تقدر تستلم ${fmt(lim.monthReceive)} وتحوّل ${fmt(lim.monthSend)} الشهر ده."
+        val text = if (parts.isEmpty()) "حدود الاستلام والتحويل رجعت من الأول لكل المحافظ."
         else "الفلوس اللي كانت متقفلة بقت متاحة: ${parts.joinToString(" و")}."
         if (led.all.isNotEmpty()) post(ctx, 300, "اتفتح حد الشهر الجديد", text)
     }

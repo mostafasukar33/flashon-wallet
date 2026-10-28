@@ -5,6 +5,7 @@ import android.os.PowerManager
 import com.flashon.wallet.core.Ledger
 import com.flashon.wallet.core.MonthSummary
 import com.flashon.wallet.core.Parsed
+import com.flashon.wallet.core.Parser
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -26,11 +27,31 @@ object DataJson {
             .put("daySend", lim.daySend).put("dayReceiveOn", lim.dayReceiveOn)
             .put("dayReceive", lim.dayReceive).put("feesCount", lim.feesCount))
         o.put("update", Updater.cached(ctx))
+        o.put("txNotify", store.txNotify)
+
+        // wallet setup: what the user chose per SIM line, and what the messages show
+        val lines = store.lines()
+        val lo = JSONObject(); for ((k, w) in lines) lo.put(k, w.key)
+        o.put("lines", lo)
+        val seen = JSONObject()
+        for (r in store.allSms()) {
+            val w = Parser.walletOf(r.sender, Parser.normalize(r.body)) ?: continue
+            val k = r.sim.ifBlank { "?" }
+            val arr = seen.optJSONArray(k) ?: JSONArray().also { seen.put(k, it) }
+            var has = false
+            for (i in 0 until arr.length()) if (arr.getString(i) == w.key) has = true
+            if (!has) arr.put(w.key)
+        }
+        o.put("seen", seen)
 
         val now = JSONArray()
         for (acc in led.accounts) {
             val n = led.now(acc)
+            val al = led.limitsFor(acc)
             now.put(JSONObject()
+                .put("line", acc.line)
+                .put("limits", JSONObject().put("monthReceive", al.monthReceive).put("monthSend", al.monthSend)
+                    .put("daySend", al.daySend).put("own", led.accountLimits.containsKey(acc.key)))
                 .put("w", acc.key).put("p", acc.wallet.key).put("label", led.accountLabel(acc))
                 .put("custom", led.learned.accountNames.containsKey(acc.key))
                 .put("own", n.ownNumber ?: JSONObject.NULL).put("hasData", n.hasData)

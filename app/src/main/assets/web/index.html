@@ -99,7 +99,7 @@ h2{margin:0;font-size:16px;font-weight:700}
 var B = window.Android;
 if (!B) {
   var mock = {
-    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:false,
+    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:false, txNotify:true, lines:{}, seen:{'1':['vf']},
     settings:{monthReceive:200000,monthSend:200000,daySend:60000,dayReceiveOn:false,dayReceive:60000,feesCount:true},
     update:{available:true,version:'2'},
     months:['2026-10'],
@@ -119,6 +119,10 @@ if (!B) {
     requestSms:function(){mock.permission=true;setTimeout(App.reload,300)},
     setType:function(id,t,learn){mock.unknown=mock.unknown.filter(function(u){return u.id!==id});setTimeout(App.reload,50)},
     setAccountName:function(k,n){mock.now.forEach(function(a){if(a.w===k){a.label=n||(a.p==='vf'?'فودافون كاش':'اتصالات كاش');a.custom=!!n}});setTimeout(App.reload,50)},
+    setLines:function(j){mock.lines=j==='null'?{}:JSON.parse(j);setTimeout(App.reload,50)},
+    setAccountLimits:function(k,j){mock.now.forEach(function(a){if(a.w===k){a.limits=j==='null'?null:JSON.parse(j);if(a.limits)a.limits.own=true}});setTimeout(App.reload,50)},
+    setTxNotify:function(v){mock.txNotify=v},
+    exportMonth:function(){toast('بيعمل الملف…')},
     setName:function(p,n){mock.txs.forEach(function(t){if(t.phone===p)t.name=n||t.smsName||p});setTimeout(App.reload,50)},
     saveSettings:function(j){mock.settings=JSON.parse(j);setTimeout(App.reload,50)},
     openBattery:function(){mock.batteryOk=true;setTimeout(App.reload,50)},
@@ -213,8 +217,9 @@ function txList(list){
   return out;
 }
 
+function limitsOf(n){ var g=D.settings, l=n.limits||{}; return {monthReceive:l.monthReceive!=null?l.monthReceive:g.monthReceive, monthSend:l.monthSend!=null?l.monthSend:g.monthSend, daySend:l.daySend!=null?l.daySend:g.daySend, dayReceiveOn:g.dayReceiveOn, dayReceive:g.dayReceive, feesCount:g.feesCount, own:!!l.own}; }
 function limitCard(n){
-  var st=D.settings;
+  var st=limitsOf(n);
   function bar(label, used, max, color){
     var pct=Math.min(100, max>0?used/max*100:0);
     return '<div class="lim"><div class="row small"><span>'+label+'</span><span class="num">'+fmt(used)+' / '+fmt(max)+'</span></div>'+
@@ -272,9 +277,9 @@ function home(){
 }
 
 function limitsScreen(){
-  var n=nowOf(S.wallet), st=D.settings, sm=(D.summaries[D.months[0]]||{})[S.wallet]||{};
+  var n=nowOf(S.wallet), st=limitsOf(nowOf(S.wallet)), sm=(D.summaries[D.months[0]]||{})[S.wallet]||{};
   var h='<div class="wrap"><button class="back" data-act="back">→ رجوع</button>';
-  h+='<div class="col" style="gap:4px"><div class="row"><h1>حدود '+esc(n.label)+'</h1><button class="pill" data-act="accname">سمّيها</button></div>'+(n.own?'<span class="small mute">رقم المحفظة <span class="num">'+esc(n.own)+'</span></span>':'')+'<span class="small mute">'+monthName(D.months[0])+'</span><span class="small mute">الشهر: '+fmt(st.monthReceive)+' استلام و'+fmt(st.monthSend)+' تحويل<br>اليوم: '+fmt(st.daySend)+' تحويل</span></div>';
+  h+='<div class="col" style="gap:4px"><div class="row"><h1>حدود '+esc(n.label)+'</h1><button class="pill" data-act="accname">سمّيها</button></div>'+(n.own?'<span class="small mute">رقم المحفظة <span class="num">'+esc(n.own)+'</span></span>':'')+'<span class="small mute">'+monthName(D.months[0])+'</span><div class="card row" style="padding:12px 14px"><span class="small" style="line-height:1.7">الشهر: <b class="num">'+fmt(st.monthReceive)+'</b> استلام و<b class="num">'+fmt(st.monthSend)+'</b> تحويل<br>اليوم: <b class="num">'+fmt(st.daySend)+'</b> تحويل'+(st.own?'<br><span class="xs mute">حدود خاصة بالمحفظة دي</span>':'')+'</span><button class="pill" data-act="acclim" data-w="'+n.w+'">غيّرها</button></div></div>';
   var canMonth = n.balance!=null?Math.min(n.balance,n.sendLeftMonth):n.sendLeftMonth;
   if (n.locked>0) h+='<div class="alert bad"><b>'+fmt(n.locked)+' ج هيتقفل عليهم للشهر الجاي</b><span style="line-height:1.7">في المحفظة '+fmt(n.balance)+'، بس فاضلك تحوّل '+fmt(n.sendLeftMonth)+' بس الشهر ده. الباقي يتحوّل من أول الشهر الجاي.</span></div>';
   else if (n.balance!=null && n.canSendNow < n.balance-0.009) h+='<div class="alert mid"><b>النهارده فاضلك تحوّل '+fmt(n.canSendNow)+' بس</b><span style="line-height:1.7">حد اليوم '+fmt(st.daySend)+'، وبيتجدد الساعة 12 بالليل.</span></div>';
@@ -343,13 +348,54 @@ function settingsScreen(){
   var st=D.settings;
   function num(id,label,v){ return '<div class="field"><label for="'+id+'">'+label+'</label><input class="num" style="text-align:right" type="number" inputmode="decimal" id="'+id+'" value="'+v+'"></div>'; }
   var h='<div class="wrap"><button class="back" data-act="back">→ رجوع</button><h1>الإعدادات</h1>';
-  h+='<div class="card col" style="gap:14px"><h2>الحدود (للمحفظتين)</h2>'+
+
+  // wallets on this phone
+  var lines=D.lines||{}, manual=Object.keys(lines).length>0 || S.editLines;
+  h+='<div class="card col" style="gap:12px"><h2>المحافظ اللي على الموبايل</h2>';
+  if (!manual) {
+    h+='<span class="small mute" style="line-height:1.7">التطبيق بيعرفها لوحده من الرسايل. ظاهر دلوقتي:</span>'+
+      '<div class="col" style="gap:4px">'+D.now.map(function(n){return '<span style="font-size:15px">• '+esc(n.label)+(n.own?' <span class="num mute small">'+esc(n.own)+'</span>':'')+'</span>'}).join('')+'</div>'+
+      '<button class="btn ghost" data-act="editlines">حددها بنفسي</button><span class="xs mute" style="line-height:1.6">مثلاً لو مفيش اتصالات كاش على الموبايل ده، أو فيه خطين فودافون.</span>';
+  } else {
+    var seen=D.seen||{};
+    var guess=function(l){ if(lines[l]) return lines[l]; if(Object.keys(lines).length) return ''; var w=(seen[l]||[])[0]; if(w) return w; return l==='1'?'vf':''; };
+    ['1','2'].forEach(function(l){
+      var v=guess(l), saw=(seen[l]||[]).map(function(w){return w==='vf'?'فودافون كاش':'اتصالات كاش'}).join(' و');
+      h+='<div class="field"><label for="ln'+l+'">خط '+l+' (شريحة '+l+')</label><select id="ln'+l+'" class="pill" style="width:100%;text-align:right;min-height:48px;border-radius:10px">'+
+        [['','مفيش محفظة'],['vf','فودافون كاش'],['et','اتصالات كاش']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===v?' selected':'')+'>'+o[1]+'</option>'}).join('')+
+        '</select><span class="xs mute">'+(saw?'جالها رسايل من '+saw:'مجالهاش رسايل محافظ لسه')+'</span></div>';
+    });
+    if (seen['?']) h+='<span class="xs mute" style="line-height:1.6">فيه رسايل الموبايل مكتبش جت على أنهي خط، هتتحسب على أول محفظة من نفس الشركة.</span>';
+    h+='<button class="btn main" data-act="savelines">احفظ</button><button class="btn ghost" data-act="autolines">خليه يعرفها لوحده</button>';
+  }
+  h+='</div>';
+
+  // each wallet's limits
+  h+='<div class="card col" style="gap:10px"><h2>حدود كل محفظة</h2>'+D.now.map(function(n){
+    var l=limitsOf(n);
+    return '<div class="row" style="gap:10px;padding:6px 0;border-bottom:1px solid var(--line)"><div class="col" style="gap:2px"><b style="font-size:15px;font-weight:600">'+esc(n.label)+'</b>'+
+      '<span class="xs mute num" style="text-align:right">'+fmt(l.monthReceive)+' / '+fmt(l.monthSend)+' / '+fmt(l.daySend)+'</span>'+
+      (l.own?'<span class="xs mute">حدود خاصة</span>':'')+'</div><button class="pill" data-act="acclim" data-w="'+n.w+'">غيّرها</button></div>';
+  }).join('')+'<span class="xs mute">الأرقام: استلام الشهر / تحويل الشهر / تحويل اليوم</span></div>';
+
+  h+='<div class="card col" style="gap:14px"><h2>الحدود العادية لأي محفظة</h2><span class="small mute" style="line-height:1.7">دي اللي بتتحسب لأي محفظة ملهاش حدود خاصة.</span>'+
     num('s_mr','حد الاستلام في الشهر',st.monthReceive)+num('s_ms','حد التحويل في الشهر',st.monthSend)+num('s_ds','حد التحويل في اليوم',st.daySend)+
     '<label class="switch"><span style="font-size:15px">الرسوم بتتحسب من الحد</span><input type="checkbox" id="s_fee"'+(st.feesCount?' checked':'')+'></label>'+
     '<label class="switch"><span style="font-size:15px">فيه حد يومي للاستلام كمان</span><input type="checkbox" id="s_dro"'+(st.dayReceiveOn?' checked':'')+'></label>'+
     num('s_dr','حد الاستلام في اليوم',st.dayReceive)+
     '<button class="btn main" data-act="save">احفظ</button></div>';
-  h+='<div class="card col" style="gap:10px"><h2>التشغيل في الخلفية</h2><span class="small mute" style="line-height:1.7">'+(D.batteryOk?'التطبيق مسموحله يشتغل في الخلفية ✓':'التطبيق ممكن يتقفل لوحده عشان البطارية، فممكن تتأخر التنبيهات.')+'</span>'+
+
+  h+='<div class="card col" style="gap:6px"><h2>الإشعارات</h2>'+
+    '<label class="switch"><span style="font-size:15px">إشعار مع كل عملية</span><input type="checkbox" id="s_txn"'+(D.txNotify?' checked':'')+'></label>'+
+    '<span class="xs mute" style="line-height:1.6">أول ما فلوس تدخل أو تخرج يجيلك إشعار بالمبلغ والاسم والرصيد. تنبيهات الحدود بتيجي دايماً.</span></div>';
+
+  var mo=D.months.map(function(m){return '<option value="'+m+'">'+monthName(m)+'</option>'}).join('');
+  var wo='<option value="all">كل المحافظ</option>'+D.now.map(function(n){return '<option value="'+n.w+'">'+esc(n.label)+'</option>'}).join('');
+  h+='<div class="card col" style="gap:10px"><h2>صدّر الحساب لـ Excel</h2>'+
+    '<div class="grid2"><select id="ex_m" class="pill" style="min-height:48px;border-radius:10px">'+mo+'</select><select id="ex_w" class="pill" style="min-height:48px;border-radius:10px">'+wo+'</select></div>'+
+    '<button class="btn ghost" data-act="export">اعمل الملف وابعته</button><span class="xs mute" style="line-height:1.6">ملف بيتفتح على Excel، تقدر تبعته واتساب أو إيميل أو تحفظه على Drive.</span></div>';
+
+  h+='<div class="card col" style="gap:10px"><h2>التشغيل في الخلفية</h2><span class="small mute" style="line-height:1.7">'+(D.batteryOk?'التطبيق مسموحله يشتغل في الخلفية ✓':'التطبيق ممكن يتقفل لوحده عشان البطارية، فممكن تتأخر الإشعارات.')+'</span>'+
      (D.batteryOk?'':'<button class="btn ghost" data-act="battery">اسمحله يشتغل في الخلفية</button>')+'</div>';
   h+='<div class="card col" style="gap:10px"><h2>الرسايل</h2><span class="small mute" style="line-height:1.7">لو حاسس إن فيه عملية ناقصة، خلي التطبيق يقرا كل الرسايل من الأول.</span><button class="btn ghost" data-act="rescan">اقرا الرسايل من جديد</button></div>';
   h+='<div class="card col" style="gap:10px"><h2>التطبيق</h2><span class="small mute">النسخة '+esc(D.version)+'</span><button class="btn ghost" data-act="chkupd">شوف فيه تحديث</button></div>';
@@ -376,6 +422,14 @@ function txSheet(id){
   openSheet(h);
 }
 
+function accLimSheet(w){
+  var n=nowOf(w), l=limitsOf(n);
+  function f(id,label,v){ return '<div class="field"><label for="'+id+'">'+label+'</label><input class="num" style="text-align:right" type="number" inputmode="decimal" id="'+id+'" value="'+v+'"></div>'; }
+  openSheet('<h2>حدود '+esc(n.label)+'</h2><span class="small mute" style="line-height:1.7">لو المحفظة لسه جديدة وحدودها صغيرة، اكتب حدودها هنا. ولما تكبر غيّرها تاني.</span>'+
+    f('al_mr','حد الاستلام في الشهر',l.monthReceive)+f('al_ms','حد التحويل في الشهر',l.monthSend)+f('al_ds','حد التحويل في اليوم',l.daySend)+
+    '<button class="btn main" data-act="saveacclim" data-w="'+w+'">احفظ</button>'+
+    (l.own?'<button class="btn ghost" data-act="resetacclim" data-w="'+w+'">رجّعها للحدود العادية</button>':''));
+}
 function accNameSheet(){
   var n=nowOf(S.wallet);
   openSheet('<h2>اسم المحفظة</h2><div class="field"><label for="an">الاسم اللي يظهر</label><input type="text" id="an" value="'+esc(n.custom?n.label:'')+'" placeholder="مثلاً: فودافون المصنع"></div>'+
@@ -408,6 +462,18 @@ document.addEventListener('click', function(e){
     case 'pall': S.personAll=el.dataset.v==='1'; render(); break;
     case 'rename': renameSheet(); break;
     case 'accname': accNameSheet(); break;
+    case 'acclim': accLimSheet(el.dataset.w); break;
+    case 'saveacclim':
+      var g=function(id){var x=parseFloat(document.getElementById(id).value); return isNaN(x)?0:x;};
+      B.setAccountLimits(el.dataset.w, JSON.stringify({monthReceive:g('al_mr'),monthSend:g('al_ms'),daySend:g('al_ds')})); closeSheet(); toast('اتحفظ'); break;
+    case 'resetacclim': B.setAccountLimits(el.dataset.w, 'null'); closeSheet(); toast('رجعت للحدود العادية'); break;
+    case 'editlines': S.editLines=true; render(); break;
+    case 'savelines':
+      var m={}; ['1','2'].forEach(function(l){ var v=document.getElementById('ln'+l).value; if(v) m[l]=v; });
+      if (!Object.keys(m).length) { toast('اختار محفظة واحدة على الأقل'); break; }
+      S.editLines=false; B.setLines(JSON.stringify(m)); toast('اتحفظ'); break;
+    case 'autolines': S.editLines=false; B.setLines('null'); toast('رجع يعرفها لوحده'); break;
+    case 'export': B.exportMonth(document.getElementById('ex_m').value, document.getElementById('ex_w').value); break;
     case 'saveacc': B.setAccountName(S.wallet, document.getElementById('an').value.trim()); closeSheet(); toast('اتحفظ'); break;
     case 'savename': B.setName(S.phone, document.getElementById('nm').value.trim()); closeSheet(); toast('اتحفظ'); break;
     case 'settype':
@@ -422,7 +488,7 @@ document.addEventListener('click', function(e){
     case 'dl': B.downloadUpdate(); toast('بينزل التحديث…'); break;
   }
 });
-document.addEventListener('change', function(e){ if(e.target.id==='month'){ S.month=e.target.value; render(); } });
+document.addEventListener('change', function(e){ if(e.target.id==='month'){ S.month=e.target.value; render(); } if(e.target.id==='s_txn'){ B.setTxNotify(e.target.checked); toast(e.target.checked?'هيجيلك إشعار مع كل عملية':'الإشعارات دي اتقفلت'); } });
 var qT;
 document.addEventListener('input', function(e){
   if(e.target.id!=='q') return;

@@ -166,6 +166,40 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface
+        fun setLines(json: String) {
+            try {
+                if (json.isBlank() || json == "null") store.setLines(null)
+                else {
+                    val o = JSONObject(json); val m = LinkedHashMap<String, String>()
+                    for (k in o.keys()) m[k] = o.optString(k)
+                    store.setLines(m)
+                }
+            } catch (_: Exception) { }
+            reloadUi()
+        }
+
+        @JavascriptInterface
+        fun setAccountLimits(key: String, json: String) {
+            try { store.setAccountLimits(key, if (json.isBlank() || json == "null") null else JSONObject(json)) } catch (_: Exception) { }
+            Notifier.check(this@MainActivity, store)
+            reloadUi()
+        }
+
+        @JavascriptInterface
+        fun setTxNotify(on: Boolean) { store.txNotify = on; reloadUi() }
+
+        @JavascriptInterface
+        fun exportMonth(month: String, account: String) {
+            Thread {
+                val i = Export.month(this@MainActivity, store, month, account)
+                main.post {
+                    if (i == null) Toast.makeText(this@MainActivity, "مقدرتش أعمل الملف", Toast.LENGTH_SHORT).show()
+                    else try { startActivity(i) } catch (_: Exception) { }
+                }
+            }.start()
+        }
+
+        @JavascriptInterface
         fun saveSettings(json: String) {
             try {
                 val o = JSONObject(json)

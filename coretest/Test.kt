@@ -106,5 +106,22 @@ fun main() {
     check("line label", lt.accountLabel(Account(Wallet.VODAFONE, "2")) == "فودافون كاش – خط 2", lt.accountLabel(Account(Wallet.VODAFONE, "2")))
     check("one line no label", lx.accountLabel(Account(Wallet.VODAFONE, "")) == "فودافون كاش")
 
+    // User setup: line 1 Vodafone, line 2 Etisalat; Etisalat hidden in another setup
+    val mix = listOf(
+        RawSms("m1", "VF-Cash", "تم استلام مبلغ 1000 جنيه من رقم 01000000001. رصيدك الحالي: 1000 جنيه فودافون كاش", t("2026-11-02T10:00:00+02:00"), "1"),
+        RawSms("m2", "Etisalat", "تم تحويل مبلغ 300 جنيه الى محفظتك من 01112223334. رصيد محفظتك الحالي هو 900 جنيه", t("2026-11-03T10:00:00+02:00"), "2"),
+        RawSms("m3", "VF-Cash", "تم استلام مبلغ 50 جنيه من رقم 01000000009. رصيدك الحالي: 1050 جنيه فودافون كاش", t("2026-11-03T11:00:00+02:00"), "")
+    )
+    val lm = Ledger(mix, Limits(), Learned(), z, t("2026-11-04T12:00:00+02:00"), lines = mapOf("1" to Wallet.VODAFONE, "2" to Wallet.ETISALAT))
+    check("setup accounts", lm.accounts.map { it.key } == listOf("vf1", "et2"), lm.accounts)
+    check("setup routing", lm.now(Account(Wallet.VODAFONE, "1")).balance == 1050.0 && lm.now(Account(Wallet.ETISALAT, "2")).balance == 900.0)
+    val lh = Ledger(mix, Limits(), Learned(), z, t("2026-11-04T12:00:00+02:00"), lines = mapOf("1" to Wallet.VODAFONE))
+    check("hidden etisalat", lh.accounts.size == 1 && lh.all.none { it.wallet == Wallet.ETISALAT }, lh.accounts)
+    // A new wallet with small limits
+    val small = Limits(monthReceive = 5000.0, monthSend = 5000.0, daySend = 2000.0)
+    val ls = Ledger(mix, Limits(), Learned(), z, t("2026-11-04T12:00:00+02:00"), lines = mapOf("1" to Wallet.VODAFONE), accountLimits = mapOf("vf1" to small))
+    val ns = ls.now(Account(Wallet.VODAFONE, "1"))
+    check("own limits", ns.receiveLeft == 3950.0 && ns.canSendNow == 1050.0 && ns.sendLeftDay == 2000.0, ns)
+
     println(if (fails == 0) "ALL PASSED" else "$fails FAILED")
 }

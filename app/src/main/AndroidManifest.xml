@@ -41,6 +41,12 @@
             </intent-filter>
         </receiver>
 
+        <provider
+            android:name=".ExportProvider"
+            android:authorities="com.flashon.wallet.export"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <receiver
             android:name=".MonthReceiver"
             android:exported="true">

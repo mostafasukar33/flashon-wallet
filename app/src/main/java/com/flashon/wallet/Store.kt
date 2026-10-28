@@ -7,6 +7,7 @@ import com.flashon.wallet.core.Limits
 import com.flashon.wallet.core.Parser
 import com.flashon.wallet.core.RawSms
 import com.flashon.wallet.core.TxType
+import com.flashon.wallet.core.Wallet
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -132,7 +133,51 @@ class Store(context: Context) {
         prefs.edit().putString("accnames", o.toString()).apply()
     }
 
-    fun ledger(): Ledger = Ledger(allSms(), limits(), learned())
+    // ---------- which wallet is on which SIM line (empty = automatic) ----------
+    fun lines(): Map<String, Wallet> {
+        val o = obj("lines"); val m = LinkedHashMap<String, Wallet>()
+        for (k in o.keys()) Wallet.fromKey(o.optString(k))?.let { m[k] = it }
+        return m
+    }
+
+    /** null = back to automatic */
+    fun setLines(m: Map<String, String>?) = synchronized(LOCK) {
+        if (m == null) { prefs.edit().remove("lines").apply(); return@synchronized }
+        val o = JSONObject()
+        for ((k, v) in m) if (Wallet.fromKey(v) != null) o.put(k, v)
+        prefs.edit().putString("lines", o.toString()).apply()
+    }
+
+    // ---------- limits for one wallet ----------
+    fun accountLimits(): Map<String, Limits> {
+        val o = obj("acclimits"); val m = HashMap<String, Limits>()
+        val base = limits()
+        for (k in o.keys()) {
+            val j = o.optJSONObject(k) ?: continue
+            m[k] = base.copy(
+                monthReceive = j.optDouble("monthReceive", base.monthReceive),
+                monthSend = j.optDouble("monthSend", base.monthSend),
+                daySend = j.optDouble("daySend", base.daySend)
+            )
+        }
+        return m
+    }
+
+    /** null = use the normal limits again */
+    fun setAccountLimits(key: String, j: JSONObject?) = synchronized(LOCK) {
+        val o = obj("acclimits")
+        if (j == null) o.remove(key) else o.put(key, j)
+        prefs.edit().putString("acclimits", o.toString()).apply()
+    }
+
+    var txNotify: Boolean
+        get() = prefs.getBoolean("txNotify", true)
+        set(v) { prefs.edit().putBoolean("txNotify", v).apply() }
+
+    fun ledger(): Ledger = Ledger(
+        allSms(), limits(), learned(),
+        lines = lines(), accountLimits = accountLimits()
+    )
 
     // ---------- small memory (notifications, updates) ----------
     fun getStr(k: String): String? = prefs.getString(k, null)

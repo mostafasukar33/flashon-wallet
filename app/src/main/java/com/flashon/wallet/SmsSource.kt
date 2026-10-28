@@ -94,7 +94,9 @@ class SmsReceiver : BroadcastReceiver() {
         Thread {
             try {
                 val store = Store(context)
+                val before = store.allSms().map { it.id }.toHashSet()
                 if (store.addSms(list) > 0) {
+                    Notifier.announce(context, store, list.map { it.id }.filter { it !in before })
                     Notifier.check(context, store)
                     MainActivity.refreshIfOpen()
                 }
