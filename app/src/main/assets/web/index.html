@@ -104,8 +104,8 @@ if (!B) {
     update:{available:true,version:'2'},
     months:['2026-10'],
     now:[
-      {w:'vf',label:'فودافون كاش',hasData:true,balance:8713.70,lastTime:Date.parse('2026-10-25T17:12:00+03:00'),monthReceived:7000,monthSent:502.5,daySent:0,dayReceived:0,receiveLeft:193000,sendLeftMonth:199497.5,sendLeftDay:60000,receiveLeftDay:null,canSendNow:8713.70,locked:0},
-      {w:'et',label:'اتصالات كاش',hasData:false,balance:null,lastTime:null,monthReceived:0,monthSent:0,daySent:0,dayReceived:0,receiveLeft:200000,sendLeftMonth:200000,sendLeftDay:60000,receiveLeftDay:null,canSendNow:60000,locked:0}
+      {w:'vf',p:'vf',own:'01005174644',label:'فودافون كاش',hasData:true,balance:8713.70,lastTime:Date.parse('2026-10-25T17:12:00+03:00'),monthReceived:7000,monthSent:502.5,daySent:0,dayReceived:0,receiveLeft:193000,sendLeftMonth:199497.5,sendLeftDay:60000,receiveLeftDay:null,canSendNow:8713.70,locked:0},
+      {w:'et',p:'et',own:null,label:'اتصالات كاش',hasData:false,balance:null,lastTime:null,monthReceived:0,monthSent:0,daySent:0,dayReceived:0,receiveLeft:200000,sendLeftMonth:200000,sendLeftDay:60000,receiveLeftDay:null,canSendNow:60000,locked:0}
     ],
     summaries:{'2026-10':{vf:{inTotal:7000,outTotal:500,fees:2.5,count:2,start:57432.2,end:8713.7,received:7000,sent:502.5},et:{inTotal:0,outTotal:0,fees:0,count:0,start:null,end:null,received:0,sent:0}}},
     txs:[
@@ -118,6 +118,7 @@ if (!B) {
     getData:function(){return JSON.stringify(mock)},
     requestSms:function(){mock.permission=true;setTimeout(App.reload,300)},
     setType:function(id,t,learn){mock.unknown=mock.unknown.filter(function(u){return u.id!==id});setTimeout(App.reload,50)},
+    setAccountName:function(k,n){mock.now.forEach(function(a){if(a.w===k){a.label=n||(a.p==='vf'?'فودافون كاش':'اتصالات كاش');a.custom=!!n}});setTimeout(App.reload,50)},
     setName:function(p,n){mock.txs.forEach(function(t){if(t.phone===p)t.name=n||t.smsName||p});setTimeout(App.reload,50)},
     saveSettings:function(j){mock.settings=JSON.parse(j);setTimeout(App.reload,50)},
     openBattery:function(){mock.batteryOk=true;setTimeout(App.reload,50)},
@@ -144,7 +145,8 @@ try{
 function monthName(key){ var p=key.split('-'); return monF.format(new Date(+p[0],+p[1]-1,15)); }
 function monthKey(t){ var d=new Date(t); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2); }
 function dayKey(t){ var d=new Date(t); return d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate(); }
-function wname(w){ return w==='vf'?'فودافون':'اتصالات'; }
+function accLabel(w){ var n=nowOf(w); return n?n.label:(w.charAt(0)==='v'?'فودافون كاش':'اتصالات كاش'); }
+function wname(w){ return accLabel(w).replace(' كاش',''); }
 function nowOf(w){ return D.now.filter(function(x){return x.w===w})[0]; }
 var ICON = {
   gear:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
@@ -244,12 +246,12 @@ function home(){
 
   h+='<div class="grid2">'+D.now.map(function(n){
     var sel=S.filter===n.w?' sel':'';
-    return '<button class="wcard'+sel+'" data-act="wallet" data-w="'+n.w+'"><span class="small mute">'+esc(n.label)+'</span>'+
+    return '<button class="wcard'+sel+'" data-act="wallet" data-w="'+n.w+'"><span class="small mute">'+esc(n.label)+'</span>'+(n.own?'<span class="xs mute num" style="text-align:right">'+esc(n.own)+'</span>':'')+
       (n.balance!=null?'<span class="big num" style="text-align:right">'+fmt2(n.balance)+'</span>':'<span class="big" style="color:#8A8F95">—</span>')+
       '<span class="xs mute">'+(n.hasData?(n.balance!=null?'رصيد · ':'')+'آخر رسالة '+shortF.format(new Date(n.lastTime)):'مفيش رسايل لسه')+'</span></button>';
   }).join('')+'</div>';
 
-  var sm=D.summaries[S.month]||{}, ws=S.filter==='all'?['vf','et']:[S.filter], ti=0,to=0,tf=0;
+  var sm=D.summaries[S.month]||{}, ws=S.filter==='all'?D.now.map(function(n){return n.w}):[S.filter], ti=0,to=0,tf=0;
   ws.forEach(function(w){ var s=sm[w]; if(s){ti+=s.inTotal;to+=s.outTotal;tf+=s.fees;} });
   h+='<div class="card sum3"><div><span class="small mute">وارد الشهر</span><b class="num in">+'+fmt(ti)+'</b></div>'+
      '<div><span class="small mute">صادر الشهر</span><b class="num out">−'+fmt(to)+'</b></div>'+
@@ -260,7 +262,7 @@ function home(){
   }
 
   h+='<label class="search">'+ICON.search+'<input id="q" placeholder="دوّر باسم أو رقم أو مبلغ" aria-label="بحث" inputmode="search"></label>';
-  h+='<div class="chips">'+[['all','الكل'],['vf','فودافون'],['et','اتصالات']].map(function(c){return '<button class="chip'+(S.filter===c[0]?' on':'')+'" data-act="filter" data-f="'+c[0]+'">'+c[1]+'</button>'}).join('')+'</div>';
+  h+='<div class="chips">'+[['all','الكل']].concat(D.now.map(function(n){return [n.w, wname(n.w)]})).map(function(c){return '<button class="chip'+(S.filter===c[0]?' on':'')+'" data-act="filter" data-f="'+c[0]+'">'+c[1]+'</button>'}).join('')+'</div>';
   if (S.q) h+='<span class="xs mute">نتايج البحث في كل الشهور</span>';
   h+='<div class="col" style="gap:8px" id="list">'+txList(filteredTx())+'</div>';
 
@@ -272,7 +274,7 @@ function home(){
 function limitsScreen(){
   var n=nowOf(S.wallet), st=D.settings, sm=(D.summaries[D.months[0]]||{})[S.wallet]||{};
   var h='<div class="wrap"><button class="back" data-act="back">→ رجوع</button>';
-  h+='<div class="col" style="gap:4px"><h1>حدود '+esc(n.label)+'</h1><span class="small mute">'+monthName(D.months[0])+'</span><span class="small mute">الشهر: '+fmt(st.monthReceive)+' استلام و'+fmt(st.monthSend)+' تحويل<br>اليوم: '+fmt(st.daySend)+' تحويل</span></div>';
+  h+='<div class="col" style="gap:4px"><div class="row"><h1>حدود '+esc(n.label)+'</h1><button class="pill" data-act="accname">سمّيها</button></div>'+(n.own?'<span class="small mute">رقم المحفظة <span class="num">'+esc(n.own)+'</span></span>':'')+'<span class="small mute">'+monthName(D.months[0])+'</span><span class="small mute">الشهر: '+fmt(st.monthReceive)+' استلام و'+fmt(st.monthSend)+' تحويل<br>اليوم: '+fmt(st.daySend)+' تحويل</span></div>';
   var canMonth = n.balance!=null?Math.min(n.balance,n.sendLeftMonth):n.sendLeftMonth;
   if (n.locked>0) h+='<div class="alert bad"><b>'+fmt(n.locked)+' ج هيتقفل عليهم للشهر الجاي</b><span style="line-height:1.7">في المحفظة '+fmt(n.balance)+'، بس فاضلك تحوّل '+fmt(n.sendLeftMonth)+' بس الشهر ده. الباقي يتحوّل من أول الشهر الجاي.</span></div>';
   else if (n.balance!=null && n.canSendNow < n.balance-0.009) h+='<div class="alert mid"><b>النهارده فاضلك تحوّل '+fmt(n.canSendNow)+' بس</b><span style="line-height:1.7">حد اليوم '+fmt(st.daySend)+'، وبيتجدد الساعة 12 بالليل.</span></div>';
@@ -328,7 +330,7 @@ function unknownScreen(){
   var h='<div class="wrap"><button class="back" data-act="back">→ رجوع</button><div class="col"><h1>رسايل مش مفهومة</h1><span class="small mute" style="line-height:1.7">الرسايل دي مش متحسبة لحد ما تحدد نوعها. هتحددها مرة، والتطبيق يتعلمها للرسايل اللي شبهها.</span></div>';
   if (!D.unknown.length) return h+'<div class="empty">مفيش رسايل مستنية ✓</div></div>';
   D.unknown.slice().sort(function(a,b){return b.time-a.time}).forEach(function(u){
-    h+='<div class="card col" style="gap:12px"><div class="row xs mute"><span>'+(u.w==='vf'?'فودافون كاش':'اتصالات كاش')+'</span><span>'+dayF.format(new Date(u.time))+' · '+timeF.format(new Date(u.time))+'</span></div>'+
+    h+='<div class="card col" style="gap:12px"><div class="row xs mute"><span>'+esc(accLabel(u.w))+'</span><span>'+dayF.format(new Date(u.time))+' · '+timeF.format(new Date(u.time))+'</span></div>'+
       '<div class="msg">'+esc(u.body)+'</div>'+
       '<div class="row small" style="justify-content:flex-start;gap:16px"><span>المبلغ: <b class="num">'+fmt(u.amount)+'</b></span>'+(u.phone?'<span>الرقم: <b class="num">'+esc(u.phone)+'</b></span>':'')+'</div>'+
       '<b style="font-size:15px">دي إيه؟</b><div class="btn3"><button class="b-in" data-act="settype" data-id="'+esc(u.id)+'" data-t="in" data-learn="1">وارد</button><button class="b-out" data-act="settype" data-id="'+esc(u.id)+'" data-t="out" data-learn="1">صادر</button><button class="b-no" data-act="settype" data-id="'+esc(u.id)+'" data-t="ignore" data-learn="1">تجاهل</button></div>'+
@@ -364,7 +366,7 @@ function txSheet(id){
   var h='<div class="row"><b class="num '+(isIn?'in':'out')+'" style="font-size:26px">'+(isIn?'+':'−')+fmt2(t.amount)+'</b><span class="pill" style="display:inline-flex;align-items:center">'+esc(t.kind)+'</span></div>'+
     '<div class="col small" style="gap:8px">'+
     (t.phone?'<div class="row"><span class="mute">'+(isIn?'من':'لـ')+'</span><span>'+esc(t.name)+(t.name!==t.phone?' · <span class="num">'+esc(t.phone)+'</span>':'')+'</span></div>':'')+
-    '<div class="row"><span class="mute">المحفظة</span><span>'+(t.w==='vf'?'فودافون كاش':'اتصالات كاش')+'</span></div>'+
+    '<div class="row"><span class="mute">المحفظة</span><span>'+esc(accLabel(t.w))+'</span></div>'+
     '<div class="row"><span class="mute">الوقت</span><span>'+dayF.format(new Date(t.time))+' · '+timeF.format(new Date(t.time))+'</span></div>'+
     (t.fee>0?'<div class="row"><span class="mute">رسوم</span><span class="num">'+fmt(t.fee)+'</span></div>':'')+
     (t.balance!=null?'<div class="row"><span class="mute">الرصيد بعدها</span><span class="num">'+fmt2(t.balance)+'</span></div>':'')+
@@ -374,6 +376,12 @@ function txSheet(id){
   openSheet(h);
 }
 
+function accNameSheet(){
+  var n=nowOf(S.wallet);
+  openSheet('<h2>اسم المحفظة</h2><div class="field"><label for="an">الاسم اللي يظهر</label><input type="text" id="an" value="'+esc(n.custom?n.label:'')+'" placeholder="مثلاً: فودافون المصنع"></div>'+
+    '<button class="btn main" data-act="saveacc">احفظ</button><span class="xs mute">لو سبته فاضي، يرجع للاسم العادي.</span>');
+  setTimeout(function(){var i=document.getElementById('an'); if(i) i.focus();},250);
+}
 function renameSheet(){
   var p=S.phone, t=D.txs.filter(function(x){return x.phone===p})[0]||{};
   openSheet('<h2>اسم الرقم <span class="num">'+esc(p)+'</span></h2><div class="field"><label for="nm">الاسم اللي يظهر</label><input type="text" id="nm" value="'+esc(t.name&&t.name!==p?t.name:'')+'" placeholder="مثلاً: محمود - عميل"></div>'+
@@ -399,6 +407,8 @@ document.addEventListener('click', function(e){
     case 'person': closeSheet(); go('person',{phone:el.dataset.p, personAll:true}); break;
     case 'pall': S.personAll=el.dataset.v==='1'; render(); break;
     case 'rename': renameSheet(); break;
+    case 'accname': accNameSheet(); break;
+    case 'saveacc': B.setAccountName(S.wallet, document.getElementById('an').value.trim()); closeSheet(); toast('اتحفظ'); break;
     case 'savename': B.setName(S.phone, document.getElementById('nm').value.trim()); closeSheet(); toast('اتحفظ'); break;
     case 'settype':
       B.setType(el.dataset.id, el.dataset.t, el.dataset.learn==='1'); closeSheet();
@@ -425,6 +435,8 @@ window.App = {
   reload: function(){
     try { D=JSON.parse(B.getData()); } catch(e){ return; }
     if (!S.month || D.months.indexOf(S.month)<0) S.month=D.months[0];
+    if (S.filter!=='all' && !D.now.some(function(n){return n.w===S.filter})) S.filter='all';
+    if (S.screen==='limits' && !nowOf(S.wallet)) { S.screen='home'; S.stack=[]; }
     if (S.screen==='person' && !D.txs.some(function(t){return t.phone===S.phone})) { S.screen='home'; S.stack=[]; }
     var y=window.scrollY; render(); window.scrollTo(0,y);
   },

@@ -5,7 +5,6 @@ import android.os.PowerManager
 import com.flashon.wallet.core.Ledger
 import com.flashon.wallet.core.MonthSummary
 import com.flashon.wallet.core.Parsed
-import com.flashon.wallet.core.Wallet
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -29,10 +28,12 @@ object DataJson {
         o.put("update", Updater.cached(ctx))
 
         val now = JSONArray()
-        for (w in Wallet.values()) {
-            val n = led.now(w)
+        for (acc in led.accounts) {
+            val n = led.now(acc)
             now.put(JSONObject()
-                .put("w", w.key).put("label", w.label).put("hasData", n.hasData)
+                .put("w", acc.key).put("p", acc.wallet.key).put("label", led.accountLabel(acc))
+                .put("custom", led.learned.accountNames.containsKey(acc.key))
+                .put("own", n.ownNumber ?: JSONObject.NULL).put("hasData", n.hasData)
                 .put("balance", d(n.balance)).put("lastTime", n.lastTime ?: JSONObject.NULL)
                 .put("monthReceived", n.monthReceived).put("monthSent", n.monthSent)
                 .put("daySent", n.daySent).put("dayReceived", n.dayReceived)
@@ -47,7 +48,7 @@ object DataJson {
         val sums = JSONObject()
         for (m in months) {
             val mo = JSONObject()
-            for (w in Wallet.values()) mo.put(w.key, summary(led.summary(m, w)))
+            for (acc in led.accounts) mo.put(acc.key, summary(led.summary(m, acc)))
             sums.put(m.toString(), mo)
         }
         o.put("summaries", sums)
@@ -67,7 +68,7 @@ object DataJson {
         .put("received", s.received).put("sent", s.sent)
 
     private fun tx(led: Ledger, p: Parsed) = JSONObject()
-        .put("id", p.sms.id).put("w", p.wallet.key).put("type", p.type.key).put("kind", p.kind)
+        .put("id", p.sms.id).put("w", led.account(p).key).put("p", p.wallet.key).put("type", p.type.key).put("kind", p.kind)
         .put("amount", d(p.amount)).put("fee", p.fee).put("balance", d(p.balance))
         .put("phone", p.phone ?: JSONObject.NULL).put("name", led.displayName(p) ?: JSONObject.NULL)
         .put("smsName", p.smsName ?: JSONObject.NULL).put("time", p.sms.time)

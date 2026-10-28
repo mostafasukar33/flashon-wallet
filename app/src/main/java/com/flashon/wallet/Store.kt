@@ -42,25 +42,31 @@ class Store(context: Context) {
             val arr = JSONArray(smsFile.readText(Charsets.UTF_8))
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
-                val r = RawSms(o.getString("id"), o.getString("s"), o.getString("b"), o.getLong("t"))
+                val r = RawSms(o.getString("id"), o.getString("s"), o.getString("b"), o.getLong("t"), o.optString("m", ""))
                 map[r.id] = r
             }
         } catch (_: Exception) { }
         return map
     }
 
-    /** Adds messages that are not saved yet. Returns how many were new. */
-    fun addSms(list: List<RawSms>): Int = synchronized(LOCK) {
+    /**
+     * Adds messages that are not saved yet. Returns how many were new.
+     * trustSim: the phone's inbox is the reference for which SIM a message came on.
+     */
+    fun addSms(list: List<RawSms>, trustSim: Boolean = false): Int = synchronized(LOCK) {
         val map = readSms()
         var added = 0
+        var changed = false
         for (r in list) {
-            val existing = map[r.id]
-            if (existing == null) { map[r.id] = r; added++ }
-            else if (r.time < existing.time) map[r.id] = r // keep the earliest time we saw
+            val e = map[r.id]
+            if (e == null) { map[r.id] = r; added++; changed = true; continue }
+            val sim = if (r.sim.isNotBlank() && (e.sim.isBlank() || trustSim)) r.sim else e.sim
+            val time = minOf(e.time, r.time)
+            if (sim != e.sim || time != e.time) { map[r.id] = e.copy(sim = sim, time = time); changed = true }
         }
-        if (added > 0 || list.isNotEmpty()) {
+        if (changed) {
             val arr = JSONArray()
-            for (r in map.values) arr.put(JSONObject().put("id", r.id).put("s", r.sender).put("b", r.body).put("t", r.time))
+            for (r in map.values) arr.put(JSONObject().put("id", r.id).put("s", r.sender).put("b", r.body).put("t", r.time).put("m", r.sim))
             val tmp = File(ctx.filesDir, "sms.json.tmp")
             tmp.writeText(arr.toString(), Charsets.UTF_8)
             tmp.renameTo(smsFile)
@@ -104,7 +110,7 @@ class Store(context: Context) {
         return m
     }
 
-    fun learned() = Learned(typeMap("overrides"), typeMap("rules"), strMap("names"))
+    fun learned() = Learned(typeMap("overrides"), typeMap("rules"), strMap("names"), strMap("accnames"))
 
     fun setOverride(id: String, t: TxType) = synchronized(LOCK) {
         prefs.edit().putString("overrides", obj("overrides").put(id, t.key).toString()).apply()
@@ -118,6 +124,12 @@ class Store(context: Context) {
         val o = obj("names")
         if (name.isBlank()) o.remove(phone) else o.put(phone, name.take(40))
         prefs.edit().putString("names", o.toString()).apply()
+    }
+
+    fun setAccountName(key: String, name: String) = synchronized(LOCK) {
+        val o = obj("accnames")
+        if (name.isBlank()) o.remove(key) else o.put(key, name.take(30))
+        prefs.edit().putString("accnames", o.toString()).apply()
     }
 
     fun ledger(): Ledger = Ledger(allSms(), limits(), learned())

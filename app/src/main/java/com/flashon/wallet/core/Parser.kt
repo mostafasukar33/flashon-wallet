@@ -24,7 +24,8 @@ enum class TxType(val key: String) {
     }
 }
 
-data class RawSms(val id: String, val sender: String, val body: String, val time: Long)
+/** sim = which SIM line the message came on ("1", "2", or "" when the phone does not say). */
+data class RawSms(val id: String, val sender: String, val body: String, val time: Long, val sim: String = "")
 
 data class Parsed(
     val sms: RawSms,
@@ -38,6 +39,7 @@ data class Parsed(
     val txId: String?,
     val signature: String,
     var kind: String,
+    val own: String? = null,
     var how: String = "words" // words | rule | override | balance
 )
 
@@ -215,7 +217,7 @@ object Parser {
             type = TxType.IGNORE
         }
 
-        return Parsed(sms, wallet, type, amount, fee, balance, phone, name, txId, signature(wallet, text), kind)
+        return Parsed(sms, wallet, type, amount, fee, balance, phone, name, txId, signature(wallet, text), kind, own)
     }
 
     /** First few words of the message without numbers – used to learn a message shape once the user classifies it. */

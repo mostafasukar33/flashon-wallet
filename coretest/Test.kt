@@ -81,16 +81,30 @@ fun main() {
     ex += RawSms("c", "VF-Cash", "تم تحويل 110000 جنيه لرقم 01000000003 رصيد حسابك فى فودافون كاش الحالي 110000", t("2026-11-05T10:00:00+02:00"))
     ex += RawSms("d", "VF-Cash", "تم تحويل 40000 جنيه لرقم 01000000003 رصيد حسابك فى فودافون كاش الحالي 70000", t("2026-11-10T09:00:00+02:00"))
     val lx = Ledger(ex, Limits(feesCount = true), Learned(), z, t("2026-11-10T12:00:00+02:00"))
-    val n = lx.now(Wallet.VODAFONE)
+    val n = lx.now(Account(Wallet.VODAFONE, ""))
     check("ex balance", n.balance == 70000.0, n)
     check("ex receive left", n.receiveLeft == 0.0, n)
     check("ex send left month", n.sendLeftMonth == 50000.0, n)
     check("ex send left day", n.sendLeftDay == 20000.0, n)
     check("ex can send now", n.canSendNow == 20000.0, n)
     check("ex locked", n.lockedNextMonth == 20000.0, n)
-    val sm = lx.summary(java.time.YearMonth.of(2026, 11), Wallet.VODAFONE)
+    val sm = lx.summary(java.time.YearMonth.of(2026, 11), Account(Wallet.VODAFONE, ""))
     check("ex start balance", sm.startBalance == 20000.0, sm)
-    check("locked end of month", lx.lockedAtEndOf(java.time.YearMonth.of(2026, 11), Wallet.VODAFONE) == 20000.0)
+    check("locked end of month", lx.lockedAtEndOf(java.time.YearMonth.of(2026, 11), Account(Wallet.VODAFONE, "")) == 20000.0)
+
+    // Two Vodafone SIMs in one phone: each line has its own balance and limits
+    val two = listOf(
+        RawSms("s1", "VF-Cash", "تم استلام مبلغ 150000 جنيه من رقم 01000000001 على رقم محفظتك 01011111111. رصيدك الحالي: 150000 جنيه", t("2026-11-02T10:00:00+02:00"), "1"),
+        RawSms("s2", "VF-Cash", "تم استلام مبلغ 100000 جنيه من رقم 01000000002 على رقم محفظتك 01022222222. رصيدك الحالي: 100000 جنيه", t("2026-11-03T10:00:00+02:00"), "2"),
+        RawSms("s3", "VF-Cash", "تم تحويل 1000 جنيه لرقم 01000000003 رصيد حسابك فى فودافون كاش الحالي 149000", t("2026-11-04T10:00:00+02:00"), "1")
+    )
+    val lt = Ledger(two, Limits(), Learned(), z, t("2026-11-04T12:00:00+02:00"))
+    val l1 = lt.now(Account(Wallet.VODAFONE, "1")); val l2 = lt.now(Account(Wallet.VODAFONE, "2"))
+    check("two lines accounts", lt.accounts.map { it.key } == listOf("vf1", "vf2", "et"), lt.accounts)
+    check("line1 balance", l1.balance == 149000.0 && l1.monthReceived == 150000.0 && l1.ownNumber == "01011111111", l1)
+    check("line2 balance", l2.balance == 100000.0 && l2.monthReceived == 100000.0 && l2.monthSent == 0.0, l2)
+    check("line label", lt.accountLabel(Account(Wallet.VODAFONE, "2")) == "فودافون كاش – خط 2", lt.accountLabel(Account(Wallet.VODAFONE, "2")))
+    check("one line no label", lx.accountLabel(Account(Wallet.VODAFONE, "")) == "فودافون كاش")
 
     println(if (fails == 0) "ALL PASSED" else "$fails FAILED")
 }

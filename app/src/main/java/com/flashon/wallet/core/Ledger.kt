@@ -5,7 +5,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.YearMonth
 
-/** Limits as the user set them. Same numbers for both wallets. */
+/** Limits as the user set them. Same numbers for every wallet. */
 data class Limits(
     val monthReceive: Double = 200_000.0,
     val monthSend: Double = 200_000.0,
@@ -19,8 +19,17 @@ data class Limits(
 data class Learned(
     val overrides: Map<String, TxType> = emptyMap(),   // sms id -> type
     val rules: Map<String, TxType> = emptyMap(),       // message signature -> type
-    val names: Map<String, String> = emptyMap()        // phone -> name the user chose
+    val names: Map<String, String> = emptyMap(),       // phone -> name the user chose
+    val accountNames: Map<String, String> = emptyMap() // account key -> name the user chose
 )
+
+/**
+ * One wallet the user owns: a provider on a SIM line.
+ * A phone with two Vodafone SIMs has two accounts: vf1 and vf2.
+ */
+data class Account(val wallet: Wallet, val line: String) {
+    val key: String get() = wallet.key + line
+}
 
 data class MonthSummary(
     var inTotal: Double = 0.0,
@@ -29,15 +38,16 @@ data class MonthSummary(
     var count: Int = 0,
     var startBalance: Double? = null,
     var endBalance: Double? = null,
-    var received: Double = 0.0, // counted toward the receive limit
-    var sent: Double = 0.0      // counted toward the send limit (fees included if set)
+    var received: Double = 0.0,
+    var sent: Double = 0.0
 )
 
 data class WalletNow(
-    val wallet: Wallet,
+    val account: Account,
     val hasData: Boolean,
     val balance: Double?,
     val lastTime: Long?,
+    val ownNumber: String?,
     val monthReceived: Double,
     val monthSent: Double,
     val daySent: Double,
@@ -57,19 +67,41 @@ class Ledger(
     val zone: ZoneId = ZoneId.systemDefault(),
     val nowMillis: Long = System.currentTimeMillis()
 ) {
-    /** every wallet message we understood or not, oldest first */
     val all: List<Parsed>
     val txs: List<Parsed>
     val unknown: List<Parsed>
+    /** accounts that have messages, plus an empty one per provider that has none (to show the card) */
+    val accounts: List<Account>
+    private val accountOf = HashMap<String, Account>() // sms id -> account
+    /** true when a provider is split over more than one SIM line */
+    private val multiLine = HashSet<Wallet>()
 
     init {
         val parsed = raws.mapNotNull { Parser.parse(it) }
             .distinctBy { it.txId?.let { id -> it.wallet.key + id } ?: ("sms" + it.sms.id) }
             .sortedBy { it.sms.time }
 
-        // 1) the user's word comes first, 2) learned message shapes, 3) balance arithmetic
-        val lastBalance = HashMap<Wallet, Double>()
+        // Which SIM lines each provider uses
+        val acc = ArrayList<Account>()
+        for (w in Wallet.values()) {
+            val mine = parsed.filter { it.wallet == w }
+            val lines = mine.map { it.sms.sim }.filter { it.isNotBlank() }.distinct().sorted()
+            if (lines.size >= 2) {
+                multiLine += w
+                for (l in lines) acc += Account(w, l)
+                for (p in mine) accountOf[p.sms.id] = Account(w, p.sms.sim.ifBlank { lines.first() })
+            } else {
+                val a = Account(w, "")
+                acc += a
+                for (p in mine) accountOf[p.sms.id] = a
+            }
+        }
+        accounts = acc
+
+        // 1) the user's word, 2) learned message shapes, 3) balance arithmetic
+        val lastBalance = HashMap<String, Double>()
         for (p in parsed) {
+            val ak = account(p).key
             val o = learned.overrides[p.sms.id]
             if (o != null) {
                 p.type = o; p.how = "override"
@@ -78,7 +110,7 @@ class Ledger(
                 if (r != null) {
                     p.type = r; p.how = "rule"
                 } else {
-                    val prev = lastBalance[p.wallet]
+                    val prev = lastBalance[ak]
                     val a = p.amount
                     val b = p.balance
                     if (prev != null && a != null && b != null) {
@@ -87,14 +119,23 @@ class Ledger(
                     }
                 }
             }
-            if (p.kind.isBlank() || p.how == "override" || p.how == "rule" || p.how == "balance") {
-                if (p.kind.isBlank()) p.kind = when (p.type) { TxType.IN -> "وارد"; TxType.OUT -> "صادر"; else -> "" }
-            }
-            p.balance?.let { lastBalance[p.wallet] = it }
+            if (p.kind.isBlank()) p.kind = when (p.type) { TxType.IN -> "وارد"; TxType.OUT -> "صادر"; else -> "" }
+            p.balance?.let { lastBalance[ak] = it }
         }
         all = parsed
         txs = parsed.filter { it.type == TxType.IN || it.type == TxType.OUT }
         unknown = parsed.filter { it.type == TxType.UNKNOWN }
+    }
+
+    fun account(p: Parsed): Account = accountOf[p.sms.id] ?: Account(p.wallet, "")
+
+    fun accountLabel(a: Account): String {
+        learned.accountNames[a.key]?.takeIf { it.isNotBlank() }?.let { return it }
+        if (a.wallet !in multiLine) return a.wallet.label
+        val lines = accounts.filter { it.wallet == a.wallet }.map { it.line }
+        val n = lines.indexOf(a.line) + 1
+        val shown = if (a.line.all { it.isDigit() }) a.line else n.toString()
+        return a.wallet.label + " – خط " + shown
     }
 
     fun monthOf(t: Long): YearMonth = YearMonth.from(Instant.ofEpochMilli(t).atZone(zone))
@@ -108,11 +149,11 @@ class Ledger(
     fun months(): List<YearMonth> =
         (txs.map { monthOf(it.sms.time) } + monthOf(nowMillis)).distinct().sortedDescending()
 
-    fun summary(month: YearMonth, wallet: Wallet): MonthSummary {
+    fun summary(month: YearMonth, a: Account): MonthSummary {
         val s = MonthSummary()
         var lastBefore: Double? = null
         for (p in all) {
-            if (p.wallet != wallet) continue
+            if (account(p) != a) continue
             val m = monthOf(p.sms.time)
             if (m < month) { p.balance?.let { lastBefore = it }; continue }
             if (m > month) break
@@ -130,14 +171,15 @@ class Ledger(
         return s
     }
 
-    fun now(wallet: Wallet): WalletNow {
+    fun now(a: Account): WalletNow {
         val thisMonth = monthOf(nowMillis)
         val today = dayOf(nowMillis)
-        val mine = all.filter { it.wallet == wallet }
+        val mine = all.filter { account(it) == a }
         val balance = mine.lastOrNull { it.balance != null }?.balance
+        val own = mine.lastOrNull { it.own != null }?.own
         var mr = 0.0; var ms = 0.0; var ds = 0.0; var dr = 0.0
         for (p in txs) {
-            if (p.wallet != wallet) continue
+            if (account(p) != a) continue
             if (monthOf(p.sms.time) != thisMonth) continue
             val isToday = dayOf(p.sms.time) == today
             if (p.type == TxType.IN) { mr += p.amount ?: 0.0; if (isToday) dr += p.amount ?: 0.0 }
@@ -151,14 +193,13 @@ class Ledger(
         if (balance != null) canSend = minOf(canSend, balance.coerceAtLeast(0.0))
         val locked = if (balance != null) (balance - minOf(balance, sendLeftMonth)).coerceAtLeast(0.0) else 0.0
         return WalletNow(
-            wallet, mine.isNotEmpty(), balance, mine.lastOrNull()?.sms?.time,
+            a, mine.isNotEmpty(), balance, mine.lastOrNull()?.sms?.time, own,
             mr, ms, ds, dr, receiveLeft, sendLeftMonth, sendLeftDay, receiveLeftDay, canSend, locked
         )
     }
 
-    /** money left over at the end of a past month because the send limit was reached */
-    fun lockedAtEndOf(month: YearMonth, wallet: Wallet): Double {
-        val s = summary(month, wallet)
+    fun lockedAtEndOf(month: YearMonth, a: Account): Double {
+        val s = summary(month, a)
         val end = s.endBalance ?: return 0.0
         val left = (limits.monthSend - s.sent).coerceAtLeast(0.0)
         return (end - minOf(end, left)).coerceAtLeast(0.0)

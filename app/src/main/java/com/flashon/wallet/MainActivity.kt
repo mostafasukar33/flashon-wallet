@@ -160,6 +160,12 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface
+        fun setAccountName(key: String, name: String) {
+            store.setAccountName(key, name)
+            reloadUi()
+        }
+
+        @JavascriptInterface
         fun saveSettings(json: String) {
             try {
                 val o = JSONObject(json)

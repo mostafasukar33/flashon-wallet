@@ -11,7 +11,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import com.flashon.wallet.core.Wallet
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.YearMonth
@@ -61,41 +60,42 @@ object Notifier {
         val lim = store.limits()
         val month = YearMonth.now().toString()
         val day = LocalDate.now().toString()
-        for (w in Wallet.values()) {
-            val n = led.now(w)
+        for ((idx, acc) in led.accounts.withIndex()) {
+            val n = led.now(acc)
             if (!n.hasData) continue
-            val base = if (w == Wallet.VODAFONE) 100 else 200
+            val label = led.accountLabel(acc)
+            val base = 100 + idx * 10
             fun once(key: String): Boolean {
-                val k = "n_${key}_${w.key}"
+                val k = "n_${key}_${acc.key}"
                 val stamp = if (key.startsWith("day")) day else month
                 if (store.getStr(k) == stamp) return false
                 store.putStr(k, stamp); return true
             }
             // receive limit
             if (n.monthReceived >= lim.monthReceive && lim.monthReceive > 0) {
-                if (once("rcv100")) post(ctx, base + 1, "${w.label}: قفلت حد الاستلام", "استلمت ${fmt(n.monthReceived)} الشهر ده. مش هتقدر تستلم تاني لحد أول الشهر الجاي.")
+                if (once("rcv100")) post(ctx, base + 1, "$label: قفلت حد الاستلام", "استلمت ${fmt(n.monthReceived)} الشهر ده. مش هتقدر تستلم تاني لحد أول الشهر الجاي.")
             } else if (n.monthReceived >= lim.monthReceive * 0.75 && lim.monthReceive > 0) {
-                if (once("rcv75")) post(ctx, base + 2, "${w.label}: قربت من حد الاستلام", "فاضلك ${fmt(n.receiveLeft)} بس تستلمهم الشهر ده.")
+                if (once("rcv75")) post(ctx, base + 2, "$label: قربت من حد الاستلام", "فاضلك ${fmt(n.receiveLeft)} بس تستلمهم الشهر ده.")
             }
             // money that will be locked until next month
-            val lk = "n_lock_${w.key}_$month"
+            val lk = "n_lock_${acc.key}_$month"
             val last = store.getDouble(lk)
             if (n.lockedNextMonth > 0.5 && n.lockedNextMonth > last + 0.5) {
                 store.putDouble(lk, n.lockedNextMonth)
-                post(ctx, base + 3, "${w.label}: ${fmt(n.lockedNextMonth)} ج هيتقفل عليهم",
+                post(ctx, base + 3, "$label: ${fmt(n.lockedNextMonth)} ج هيتقفل عليهم",
                     "في المحفظة ${fmt(n.balance ?: 0.0)}، وفاضلك تحوّل ${fmt(n.sendLeftMonth)} بس الشهر ده. الباقي يتحوّل من أول الشهر الجاي.")
             }
             // daily send limit
             if (lim.daySend > 0) {
                 if (n.daySent >= lim.daySend) {
-                    if (once("day100")) post(ctx, base + 4, "${w.label}: قفلت حد التحويل النهارده", "حوّلت ${fmt(n.daySent)} النهارده. الحد يتجدد الساعة 12 بالليل.")
+                    if (once("day100")) post(ctx, base + 4, "$label: قفلت حد التحويل النهارده", "حوّلت ${fmt(n.daySent)} النهارده. الحد يتجدد الساعة 12 بالليل.")
                 } else if (lim.daySend > 10000 && n.daySent >= lim.daySend - 10000) {
-                    if (once("day90")) post(ctx, base + 5, "${w.label}: قربت من حد اليوم", "فاضلك ${fmt(n.sendLeftDay)} بس تحوّلهم النهارده.")
+                    if (once("day90")) post(ctx, base + 5, "$label: قربت من حد اليوم", "فاضلك ${fmt(n.sendLeftDay)} بس تحوّلهم النهارده.")
                 }
             }
             // daily receive limit (only if turned on)
             if (lim.dayReceiveOn && lim.dayReceive > 0 && n.dayReceived >= lim.dayReceive) {
-                if (once("dayr100")) post(ctx, base + 6, "${w.label}: قفلت حد الاستلام النهارده", "استلمت ${fmt(n.dayReceived)} النهارده.")
+                if (once("dayr100")) post(ctx, base + 6, "$label: قفلت حد الاستلام النهارده", "استلمت ${fmt(n.dayReceived)} النهارده.")
             }
         }
     }
@@ -120,9 +120,9 @@ object Notifier {
         val led = store.ledger()
         val prev = YearMonth.now().minusMonths(1)
         val parts = ArrayList<String>()
-        for (w in Wallet.values()) {
-            val locked = led.lockedAtEndOf(prev, w)
-            if (locked > 0.5) parts += "${fmt(locked)} في ${w.label}"
+        for (acc in led.accounts) {
+            val locked = led.lockedAtEndOf(prev, acc)
+            if (locked > 0.5) parts += "${fmt(locked)} في ${led.accountLabel(acc)}"
         }
         val lim = store.limits()
         val text = if (parts.isEmpty()) "تقدر تستلم ${fmt(lim.monthReceive)} وتحوّل ${fmt(lim.monthSend)} الشهر ده."
