@@ -88,6 +88,15 @@ object Parser {
             .trim()
     }
 
+    private val NAME_STOP = Regex("\\s*(?:بنجاح|بنجاح\\.|successfully|تم|رصيد).*$", RegexOption.IGNORE_CASE)
+
+    /** "Mohamed G Derar   بنجاح" -> "Mohamed G Derar" */
+    fun cleanName(raw: String): String? =
+        raw.replace(NAME_STOP, "").replace(Regex("\\s+"), " ").trim().take(40).ifBlank { null }
+
+    /** For word matching only: أ إ آ -> ا , ى -> ي , ة -> ه */
+    fun fold(s: String): String = s.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ى', 'ي').replace('ة', 'ه')
+
     fun toNumber(s: String): Double? = s.replace(",", "").toDoubleOrNull()
 
     fun walletOf(sender: String, body: String): Wallet? {
@@ -100,8 +109,10 @@ object Parser {
         if (s.contains("etisalat") || s.contains("e&") || s.contains("اتصالات") || s.contains("emoney") || s.contains("e-money"))
             return Wallet.ETISALAT
         if (b.contains("فودافون كاش") || b.contains("vodafone cash")) return Wallet.VODAFONE
-        if (b.contains("اتصالات كاش") || b.contains("e& money") || b.contains("etisalat cash") || b.contains("اي آند") || b.contains("إي آند"))
+        if (b.contains("اتصالات كاش") || b.contains("e& money") || b.contains("etisalat cash") || b.contains("etisalat money") ||
+            b.contains("اي آند") || b.contains("إي آند") || b.contains("اتصالات موني") || b.contains("e&money") || b.contains("emoney"))
             return Wallet.ETISALAT
+        if (s.contains("eand") || s.contains("e-and") || s.contains("e and")) return Wallet.ETISALAT
         return null
     }
 
@@ -163,7 +174,7 @@ object Parser {
     fun parse(sms: RawSms): Parsed? {
         val text = normalize(sms.body)
         val wallet = walletOf(sms.sender, text) ?: return null
-        val low = text.lowercase()
+        val low = fold(text.lowercase())
 
         // Transaction id (taken out so its digits are never read as a phone or an amount)
         var work = text
@@ -218,20 +229,20 @@ object Parser {
         // Name written in the message
         var name: String? = null
         RX11
-            .find(work)?.let { name = it.groupValues[1].trim().take(40).ifBlank { null } }
+            .find(work)?.let { name = cleanName(it.groupValues[1]) }
 
         // Type
         var type = TxType.UNKNOWN
         var kind = ""
-        if (IGNORE_WORDS.any { low.contains(it) }) {
+        if (IGNORE_WORDS.any { low.contains(fold(it)) }) {
             type = TxType.IGNORE
         } else {
             var best = Int.MAX_VALUE
             for ((w, t, k) in TYPE_WORDS) {
-                val i = low.indexOf(w.lowercase())
+                val i = low.indexOf(fold(w.lowercase()))
                 if (i >= 0 && i < best) { best = i; type = t; kind = k }
             }
-            if (type == TxType.OUT && kind == "تحويل" && TO_ME.any { low.contains(it) }) {
+            if (type == TxType.OUT && kind == "تحويل" && TO_ME.any { low.contains(fold(it)) }) {
                 type = TxType.IN; kind = "استلام"
             }
         }

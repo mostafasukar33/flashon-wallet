@@ -16,7 +16,7 @@ object SmsSource {
     fun isWallet(sender: String, body: String) = Parser.walletOf(sender, Parser.normalize(body)) != null
 
     /** Reads every wallet message already in the phone's inbox. */
-    private const val FULL_SCAN_VERSION = 2
+    private const val FULL_SCAN_VERSION = 3
 
     /**
      * full = read every wallet message in the phone (first run, "read again", after an update

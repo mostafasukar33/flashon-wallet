@@ -167,5 +167,21 @@ fun main() {
     println("speed 6000 msgs: first ${first}ms, again ${second}ms, txs=${lb.txs.size}, months=${lb.months().size}")
     check("speed again", second < 400, second)
 
+    // Real Etisalat messages
+    val etOut = """تم تحويل مبلغ 3000.00 ج.م الى رقم 01012936963 بنجاح. 
+رسوم التحويل 1.00  جنيه.
+رصيد محفظتك الحالى 2153.29. 
+استخدم etisalat money هتكسب و العب هتكسب هدايا تانية كتير http://spr.ly/Spin_The_Wheel
+ وكمان تقدر تستمتع بخصم  %30على وجبة كومبو من Buffalo Burger ب 160 جنيه بدل225 لما تدفع ب etisalat money http://spr.ly/BuffaloBurger2"""
+    val etIn = """تم إستلام مبلغ 4500.00 ج.م من رقم 01063470062 المسجل باسمMohamed G Derar   بنجاح. رصيد محفظتك الحالى 60157.29 ج.م.
+استخدم etisalat money هتكسب و العب هتكسب هدايا تانية كتير http://spr.ly/Spin_The_Wheel
+ وكمان تقدر تستمتع بخصم  %30على وجبة كومبو من Buffalo Burger ب 160 جنيه بدل225 لما تدفع ب http://spr.ly/BuffaloBurger2 etisalat money"""
+    for (snd in listOf("etisalat", "e& money", "4321", "eand money")) {
+        val o = Parser.parse(RawSms("eo", snd, etOut, 0))
+        check("et out [$snd]", o != null && o.wallet == Wallet.ETISALAT && o.type == TxType.OUT && o.amount == 3000.0 && o.fee == 1.0 && o.balance == 2153.29 && o.phone == "01012936963", o)
+        val i = Parser.parse(RawSms("ei", snd, etIn, 0))
+        check("et in [$snd]", i != null && i.wallet == Wallet.ETISALAT && i.type == TxType.IN && i.amount == 4500.0 && i.balance == 60157.29 && i.phone == "01063470062" && i.smsName == "Mohamed G Derar", i)
+    }
+
     println(if (fails == 0) "ALL PASSED" else "$fails FAILED")
 }
