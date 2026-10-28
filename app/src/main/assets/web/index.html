@@ -93,7 +93,7 @@ h2{margin:0;font-size:16px;font-weight:700}
 </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="app"><div class="wrap" style="padding-top:30vh;align-items:center;gap:14px"><svg width="72" height="72" viewBox="0 0 108 108" aria-hidden="true"><rect width="108" height="108" rx="24" fill="#1E5AA8"/><rect x="31" y="27" width="40" height="14" rx="5" fill="#BFD3EE"/><rect x="24" y="35" width="60" height="42" rx="9" fill="#fff"/><rect x="62" y="49" width="24" height="15" rx="5" fill="#1E5AA8"/><circle cx="70" cy="56.5" r="3" fill="#fff"/></svg><span class="mute">لحظة…</span></div></div>
 <div id="topbar" class="topbar" aria-hidden="true"></div>
 <div id="sheetBg"></div>
 <div id="sheet"></div>
@@ -413,7 +413,7 @@ function settingsScreen(){
 
 /* ---------- sheets ---------- */
 function openSheet(html){ var s=document.getElementById('sheet'); s.innerHTML='<div class="handle"></div><div class="wrap">'+html+'</div>'; document.getElementById('sheetBg').style.display='block'; requestAnimationFrame(function(){s.classList.add('open')}); }
-function closeSheet(){ var s=document.getElementById('sheet'); s.classList.remove('open'); document.getElementById('sheetBg').style.display='none'; }
+function closeSheet(){ var s=document.getElementById('sheet'); s.classList.remove('open'); document.getElementById('sheetBg').style.display='none'; if (pending) { pending=false; var y=window.scrollY; render(); window.scrollTo(0,y); } }
 
 function txSheet(id){
   var t=D.txs.filter(function(x){return x.id===id})[0]; if(!t) return;
@@ -425,7 +425,7 @@ function txSheet(id){
     '<div class="row"><span class="mute">الوقت</span><span>'+dayF.format(new Date(t.time))+' · '+timeF.format(new Date(t.time))+'</span></div>'+
     (t.fee>0?'<div class="row"><span class="mute">رسوم</span><span class="num">'+fmt(t.fee)+'</span></div>':'')+
     (t.balance!=null?'<div class="row"><span class="mute">الرصيد بعدها</span><span class="num">'+fmt2(t.balance)+'</span></div>':'')+
-    '</div><div class="msg">'+esc(t.body)+'</div>';
+    '</div><div class="msg">'+esc(t.body || (B.getBody ? B.getBody(t.id) : ''))+'</div>';
   if (t.phone) h+='<button class="btn ghost" data-act="person" data-p="'+esc(t.phone)+'">كل عمليات '+esc(t.name)+'</button>';
   h+='<span class="small mute">النوع غلط؟ صححه:</span><div class="btn3"><button class="b-in" data-act="settype" data-id="'+esc(t.id)+'" data-t="in">وارد</button><button class="b-out" data-act="settype" data-id="'+esc(t.id)+'" data-t="out">صادر</button><button class="b-no" data-act="settype" data-id="'+esc(t.id)+'" data-t="ignore">مش عملية</button></div>';
   openSheet(h);
@@ -526,22 +526,32 @@ document.addEventListener('input', function(e){
 });
 
 /* ---------- entry points used by the phone ---------- */
+function applyData(json){
+  try { D=JSON.parse(json); } catch(e){ return; }
+  if (!S.month || D.months.indexOf(S.month)<0) S.month=D.months[0];
+  if (S.filter!=='all' && !D.now.some(function(n){return n.w===S.filter})) S.filter='all';
+  if (S.screen==='limits' && !nowOf(S.wallet)) { S.screen='home'; S.stack=[]; }
+  if (S.screen==='person' && !D.txs.some(function(t){return t.phone===S.phone})) { S.screen='home'; S.stack=[]; }
+  // don't redraw under an open sheet or while typing; it would close it / lose the text
+  var typing = document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName);
+  if (document.getElementById('sheet').classList.contains('open') || typing) { pending=true; return; }
+  var y=window.scrollY; render(); window.scrollTo(0,y);
+}
+var pending=false;
 window.App = {
-  reload: function(){
-    try { D=JSON.parse(B.getData()); } catch(e){ return; }
-    if (!S.month || D.months.indexOf(S.month)<0) S.month=D.months[0];
-    if (S.filter!=='all' && !D.now.some(function(n){return n.w===S.filter})) S.filter='all';
-    if (S.screen==='limits' && !nowOf(S.wallet)) { S.screen='home'; S.stack=[]; }
-    if (S.screen==='person' && !D.txs.some(function(t){return t.phone===S.phone})) { S.screen='home'; S.stack=[]; }
-    var y=window.scrollY; render(); window.scrollTo(0,y);
-  },
+  reload: function(){ if (B.refresh) B.refresh(); else applyData(B.getData()); },
+  setData: function(json){ applyData(json); },
   back: back,
   onUpdate: function(j){
     var u=JSON.parse(j); D.update=u; render();
     toast(u.available?'فيه تحديث جديد':(u.error?'مقدرتش أشوف، اتأكد من النت':'عندك آخر نسخة ✓'));
   }
 };
+// show the last screen at once, then bring it up to date in the background
+var cached = B.getCached ? B.getCached() : '';
+if (cached) applyData(cached);
 App.reload();
+document.addEventListener('focusout', function(){ if (pending) setTimeout(function(){ if (pending && !document.getElementById('sheet').classList.contains('open')) { pending=false; var y=window.scrollY; render(); window.scrollTo(0,y); } }, 50); });
 })();
 </script>
 </body>

@@ -46,6 +46,25 @@ data class Parsed(
 object Parser {
 
     private const val NUM = "(\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?)"
+    private val AMOUNT_RX = listOf(
+            "(?:بمبلغ|مبلغ|بقيمة|قيمة|amount(?: of)?)\\s*:?\\s*(?:egp|ج\\.?م)?\\s*$NUM",
+            "(?:تحويل|التحويل|استلام|إيداع|ايداع|سحب|دفع|شراء|إضافة|اضافة|خصم|استرداد|سداد|received|sent|paid|transferred|deposited|withdrew)\\s+(?:egp\\s*)?$NUM",
+            "$NUM\\s*(?:جنيه|جنية|ج\\.م|ج م|egp|le\\b|l\\.e)",
+            "(?:egp|ج\\.م)\\s*$NUM"
+    ).map { Regex(it, RegexOption.IGNORE_CASE) }
+    private val RX1 = Regex("https?://\\S+|www\\.\\S+", RegexOption.IGNORE_CASE)
+    private val RX2 = Regex("[\\u200e\\u200f\\u202a-\\u202e]")
+    private val RX3 = Regex("\\s+")
+    private val RX4 = Regex("(?:رقم العملية|رقم المعاملة|رقم المرجع|transaction id|trx id|ref(?:erence)?(?: no)?)[^\\d]{0,12}(\\d{6,})", RegexOption.IGNORE_CASE)
+    private val RX5 = Regex("\\b\\d{1,2}:\\d{2}(?::\\d{2})?\\b")
+    private val RX6 = Regex("\\b\\d{2,4}[-/]\\d{1,2}[-/]\\d{1,4}\\b")
+    private val RX7 = Regex("(?:رصيد|balance)[^\\d]{0,45}?$NUM", RegexOption.IGNORE_CASE)
+    private val RX8 = Regex("(?:مصاريف|رسوم|عمولة|fees?|charges?)[^\\d]{0,18}?$NUM", RegexOption.IGNORE_CASE)
+    private val RX9 = Regex("(?:رقم محفظتك|محفظتك رقم|على محفظتك|علي محفظتك|your wallet(?: number)?)\\s*:?\\s*(01\\d{8,10})", RegexOption.IGNORE_CASE)
+    private val RX10 = Regex("(?<!\\d)(?:\\+?2)?(01\\d{8,10})(?!\\d)")
+    private val RX11 = Regex("(?:المسجل بإسم|المسجل باسم|المسجل بأسم|بإسم|باسم|بأسم|name)\\s*:?\\s*(.+?)(?=\\s+(?:على|علي|الى|إلى|في|فى|من|on|to)\\s|[.،,:\\n]|\\s+\\d|$)", RegexOption.IGNORE_CASE)
+    private val RX12 = Regex("[\\d.,:/\\-+]+")
+    private val RX13 = Regex("[^\\p{L}\\s]")
 
     /** Arabic-Indic digits -> ASCII, Arabic separators -> ASCII, links removed, spaces collapsed. */
     fun normalize(s: String): String {
@@ -63,9 +82,9 @@ object Parser {
             )
         }
         return sb.toString()
-            .replace(Regex("https?://\\S+|www\\.\\S+", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("[\\u200e\\u200f\\u202a-\\u202e]"), "")
-            .replace(Regex("\\s+"), " ")
+            .replace(RX1, " ")
+            .replace(RX2, "")
+            .replace(RX3, " ")
             .trim()
     }
 
@@ -132,6 +151,15 @@ object Parser {
     // "تم تحويل ... الى محفظتك من" means money came TO you.
     private val TO_ME = listOf("الى محفظتك", "إلى محفظتك", "لمحفظتك", "إليك", "اليك", "to your wallet")
 
+    private class Hold(val p: Parsed?)
+    private val cache = java.util.concurrent.ConcurrentHashMap<RawSms, Hold>()
+
+    /** Same as [parse] but each message is read only once per app run. Returns a fresh copy. */
+    fun parseCached(sms: RawSms): Parsed? {
+        val h = cache.getOrPut(sms) { Hold(parse(sms)) }
+        return h.p?.copy()
+    }
+
     fun parse(sms: RawSms): Parsed? {
         val text = normalize(sms.body)
         val wallet = walletOf(sms.sender, text) ?: return null
@@ -140,26 +168,26 @@ object Parser {
         // Transaction id (taken out so its digits are never read as a phone or an amount)
         var work = text
         var txId: String? = null
-        Regex("(?:رقم العملية|رقم المعاملة|رقم المرجع|transaction id|trx id|ref(?:erence)?(?: no)?)[^\\d]{0,12}(\\d{6,})", RegexOption.IGNORE_CASE)
+        RX4
             .find(work)?.let { m ->
                 txId = m.groupValues[1]
                 work = work.replaceRange(m.range, " ")
             }
         // Dates and times ("17:12 26-10-25", "2026/10/25") out of the way too
-        work = work.replace(Regex("\\b\\d{1,2}:\\d{2}(?::\\d{2})?\\b"), " ")
-            .replace(Regex("\\b\\d{2,4}[-/]\\d{1,2}[-/]\\d{1,4}\\b"), " ")
+        work = work.replace(RX5, " ")
+            .replace(RX6, " ")
 
         // Balance
         var balance: Double? = null
         var balanceRange: IntRange? = null
-        Regex("(?:رصيد|balance)[^\\d]{0,45}?$NUM", RegexOption.IGNORE_CASE).find(work)?.let { m ->
+        RX7.find(work)?.let { m ->
             balance = toNumber(m.groupValues[1]); balanceRange = m.groups[1]!!.range
         }
 
         // Fee
         var fee = 0.0
         var feeRange: IntRange? = null
-        Regex("(?:مصاريف|رسوم|عمولة|fees?|charges?)[^\\d]{0,18}?$NUM", RegexOption.IGNORE_CASE).find(work)?.let { m ->
+        RX8.find(work)?.let { m ->
             fee = toNumber(m.groupValues[1]) ?: 0.0; feeRange = m.groups[1]!!.range
         }
 
@@ -167,14 +195,9 @@ object Parser {
 
         // Amount
         var amount: Double? = null
-        val amountPatterns = listOf(
-            "(?:بمبلغ|مبلغ|بقيمة|قيمة|amount(?: of)?)\\s*:?\\s*(?:egp|ج\\.?م)?\\s*$NUM",
-            "(?:تحويل|التحويل|استلام|إيداع|ايداع|سحب|دفع|شراء|إضافة|اضافة|خصم|استرداد|سداد|received|sent|paid|transferred|deposited|withdrew)\\s+(?:egp\\s*)?$NUM",
-            "$NUM\\s*(?:جنيه|جنية|ج\\.م|ج م|egp|le\\b|l\\.e)",
-            "(?:egp|ج\\.م)\\s*$NUM"
-        )
+        val amountPatterns = AMOUNT_RX
         loop@ for (p in amountPatterns) {
-            for (m in Regex(p, RegexOption.IGNORE_CASE).findAll(work)) {
+            for (m in p.findAll(work)) {
                 val g = m.groups[1]!!
                 if (taken(g.range)) continue
                 // a phone number is never an amount
@@ -186,15 +209,15 @@ object Parser {
 
         // My own wallet number (shown in received messages) – not the other party
         var own: String? = null
-        Regex("(?:رقم محفظتك|محفظتك رقم|على محفظتك|علي محفظتك|your wallet(?: number)?)\\s*:?\\s*(01\\d{8,10})", RegexOption.IGNORE_CASE).find(work)?.let { own = it.groupValues[1] }
+        RX9.find(work)?.let { own = it.groupValues[1] }
 
         // Other party's phone
-        val phone = Regex("(?<!\\d)(?:\\+?2)?(01\\d{8,10})(?!\\d)").findAll(work)
+        val phone = RX10.findAll(work)
             .map { it.groupValues[1] }.firstOrNull { it != own }
 
         // Name written in the message
         var name: String? = null
-        Regex("(?:المسجل بإسم|المسجل باسم|المسجل بأسم|بإسم|باسم|بأسم|name)\\s*:?\\s*(.+?)(?=\\s+(?:على|علي|الى|إلى|في|فى|من|on|to)\\s|[.،,:\\n]|\\s+\\d|$)", RegexOption.IGNORE_CASE)
+        RX11
             .find(work)?.let { name = it.groupValues[1].trim().take(40).ifBlank { null } }
 
         // Type
@@ -223,9 +246,9 @@ object Parser {
     /** First few words of the message without numbers – used to learn a message shape once the user classifies it. */
     fun signature(wallet: Wallet, normalizedText: String): String {
         val words = normalizedText
-            .replace(Regex("[\\d.,:/\\-+]+"), " ")
-            .replace(Regex("[^\\p{L}\\s]"), " ")
-            .split(Regex("\\s+")).filter { it.isNotBlank() }
+            .replace(RX12, " ")
+            .replace(RX13, " ")
+            .split(RX3).filter { it.isNotBlank() }
             .take(4)
         return wallet.key + "|" + words.joinToString(" ").lowercase()
     }

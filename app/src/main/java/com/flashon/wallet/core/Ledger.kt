@@ -87,7 +87,7 @@ class Ledger(
     private val multiLine = HashSet<Wallet>()
 
     init {
-        var parsed = raws.mapNotNull { Parser.parse(it) }
+        var parsed = raws.mapNotNull { Parser.parseCached(it) }
             .distinctBy { it.txId?.let { id -> it.wallet.key + id } ?: ("sms" + it.sms.id) }
             .sortedBy { it.sms.time }
 
@@ -193,6 +193,36 @@ class Ledger(
 
     fun months(): List<YearMonth> =
         (txs.map { monthOf(it.sms.time) } + monthOf(nowMillis)).distinct().sortedDescending()
+
+    /** Every month for every wallet in one pass over the messages. */
+    fun allSummaries(): Map<YearMonth, Map<String, MonthSummary>> {
+        val out = HashMap<YearMonth, HashMap<String, MonthSummary>>()
+        val lastBal = HashMap<String, Double>()     // last balance seen per wallet
+        val curMonth = HashMap<String, YearMonth>() // month we're in per wallet
+        for (p in all) {
+            val a = account(p)
+            val k = a.key
+            val m = monthOf(p.sms.time)
+            val s = out.getOrPut(m) { HashMap() }.getOrPut(k) { MonthSummary() }
+            if (curMonth[k] != m) {
+                curMonth[k] = m
+                s.startBalance = lastBal[k]
+            }
+            val isTx = p.type == TxType.IN || p.type == TxType.OUT
+            if (p.type == TxType.IN) {
+                s.inTotal += p.amount ?: 0.0; s.received += p.amount ?: 0.0; s.count++
+                if (s.startBalance == null && p.balance != null) s.startBalance = p.balance - (p.amount ?: 0.0)
+            } else if (p.type == TxType.OUT) {
+                s.outTotal += p.amount ?: 0.0; s.fees += p.fee; s.sent += sentCost(p); s.count++
+                if (s.startBalance == null && p.balance != null) s.startBalance = p.balance + (p.amount ?: 0.0) + p.fee
+            }
+            if (!isTx && s.startBalance == null && lastBal[k] == null) { /* info message: nothing to add */ }
+            p.balance?.let { s.endBalance = it; lastBal[k] = it }
+        }
+        // months with no messages still carry the balance forward
+        for ((m, byAcc) in out) for ((k, s) in byAcc) if (s.endBalance == null) s.endBalance = s.startBalance
+        return out
+    }
 
     fun summary(month: YearMonth, a: Account): MonthSummary {
         val s = MonthSummary()

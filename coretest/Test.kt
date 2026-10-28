@@ -138,5 +138,34 @@ fun main() {
     val lauto = Ledger(subs, Limits(), Learned(), z, t("2026-11-04T12:00:00+02:00"))
     check("auto sub split", lauto.accounts.size == 2 && lauto.accountLabel(lauto.accounts[0]) == "فودافون كاش – خط 1", lauto.accounts)
 
+    // one-pass summaries match the per-month ones
+    val allS = lx.allSummaries()
+    val one = allS[java.time.YearMonth.of(2026, 11)]!!["vf"]!!
+    val ref = lx.summary(java.time.YearMonth.of(2026, 11), Account(Wallet.VODAFONE, ""))
+    check("one-pass summary", one.inTotal == ref.inTotal && one.outTotal == ref.outTotal && one.startBalance == ref.startBalance && one.endBalance == ref.endBalance, one to ref)
+
+    // speed: 3 years of a busy wallet on two lines
+    val big = ArrayList<RawSms>()
+    var bal = 0.0
+    val t0 = t("2024-01-01T09:00:00+02:00")
+    for (i in 0 until 6000) {
+        val inMsg = i % 3 != 0
+        val amt = 100.0 + (i % 50) * 37
+        bal += if (inMsg) amt else -(amt + 2.5)
+        val b = if (inMsg) "تم استلام مبلغ ${amt} جنيه من رقم 0100000${1000 + i % 300} على رقم محفظتك 0103181901${i % 2}. رصيدك الحالي: ${"%.2f".format(java.util.Locale.US, bal)} جنيه رقم العملية: ${100000000 + i}"
+                else "تم تحويل ${amt} جنيه لرقم 0111000${1000 + i % 300} مصاريف الخدمة 2.5 جنيه رصيد حسابك فى فودافون كاش الحالي ${"%.2f".format(java.util.Locale.US, bal)}. رقم العملية ${200000000 + i}"
+        big += RawSms("b$i", "VF-Cash", b, t0 + i * 4L * 3600_000, if (i % 2 == 0) "s3" else "s5")
+    }
+    var ms = System.nanoTime()
+    var lb = Ledger(big, Limits(), Learned(), z, t0 + 6000L * 4 * 3600_000)
+    lb.allSummaries(); lb.accounts.forEach { lb.now(it) }
+    val first = (System.nanoTime() - ms) / 1_000_000
+    ms = System.nanoTime()
+    lb = Ledger(big, Limits(), Learned(), z, t0 + 6000L * 4 * 3600_000)
+    lb.allSummaries(); lb.accounts.forEach { lb.now(it) }
+    val second = (System.nanoTime() - ms) / 1_000_000
+    println("speed 6000 msgs: first ${first}ms, again ${second}ms, txs=${lb.txs.size}, months=${lb.months().size}")
+    check("speed again", second < 400, second)
+
     println(if (fails == 0) "ALL PASSED" else "$fails FAILED")
 }

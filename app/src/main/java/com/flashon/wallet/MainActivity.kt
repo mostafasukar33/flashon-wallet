@@ -96,8 +96,27 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
+    // Building the screen data happens off the main thread; requests that arrive while one is
+    // running are merged into a single follow-up build.
+    private val building = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val again = java.util.concurrent.atomic.AtomicBoolean(false)
+
     fun reloadUi() {
-        main.post { if (::web.isInitialized) web.evaluateJavascript("window.App&&App.reload()", null) }
+        again.set(true)
+        if (!building.compareAndSet(false, true)) return
+        Thread {
+            try {
+                while (again.getAndSet(false)) {
+                    val json = try { DataJson.build(this, store) } catch (_: Exception) { null } ?: continue
+                    store.saveScreen(json)
+                    val q = JSONObject.quote(json)
+                    main.post { if (::web.isInitialized) web.evaluateJavascript("window.App&&App.setData($q)", null) }
+                }
+            } finally {
+                building.set(false)
+                if (again.get()) reloadUi()
+            }
+        }.start()
     }
 
     @Deprecated("Deprecated in Java")
@@ -132,6 +151,18 @@ class MainActivity : Activity() {
     inner class Bridge {
         @JavascriptInterface
         fun getData(): String = DataJson.build(this@MainActivity, store)
+
+        /** The last screen, saved on the phone, so the app shows something instantly. */
+        @JavascriptInterface
+        fun getCached(): String = store.cachedScreen() ?: ""
+
+        /** Rebuild the screen data in the background; arrives through App.setData. */
+        @JavascriptInterface
+        fun refresh() = reloadUi()
+
+        /** The full text of one message, only when the user opens it. */
+        @JavascriptInterface
+        fun getBody(id: String): String = store.allSms().firstOrNull { it.id == id }?.body ?: ""
 
         @JavascriptInterface
         fun requestSms() {
@@ -231,7 +262,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun rescan() {
             Thread {
-                SmsSource.scanInbox(this@MainActivity)
+                SmsSource.scanInbox(this@MainActivity, full = true)
                 reloadUi()
                 main.post { Toast.makeText(this@MainActivity, "خلص ✓", Toast.LENGTH_SHORT).show() }
             }.start()

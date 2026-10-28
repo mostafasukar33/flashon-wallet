@@ -25,6 +25,7 @@ class Store(context: Context) {
 
     companion object {
         private val LOCK = Any()
+        @Volatile private var memSms: LinkedHashMap<String, RawSms>? = null
 
         fun idOf(sender: String, body: String): String {
             val key = sender.trim().lowercase() + "|" + Parser.normalize(body)
@@ -37,6 +38,13 @@ class Store(context: Context) {
     fun allSms(): List<RawSms> = synchronized(LOCK) { readSms().values.toList() }
 
     private fun readSms(): LinkedHashMap<String, RawSms> {
+        memSms?.let { return LinkedHashMap(it) }
+        val map = readSmsFile()
+        memSms = LinkedHashMap(map)
+        return map
+    }
+
+    private fun readSmsFile(): LinkedHashMap<String, RawSms> {
         val map = LinkedHashMap<String, RawSms>()
         if (!smsFile.exists()) return map
         try {
@@ -71,6 +79,7 @@ class Store(context: Context) {
             val tmp = File(ctx.filesDir, "sms.json.tmp")
             tmp.writeText(arr.toString(), Charsets.UTF_8)
             tmp.renameTo(smsFile)
+            memSms = LinkedHashMap(map)
         }
         added
     }
@@ -173,6 +182,11 @@ class Store(context: Context) {
     var txNotify: Boolean
         get() = prefs.getBoolean("txNotify", true)
         set(v) { prefs.edit().putBoolean("txNotify", v).apply() }
+
+    // ---------- the last screen data, to show instantly on open ----------
+    private val screenFile = File(ctx.filesDir, "screen.json")
+    fun cachedScreen(): String? = try { if (screenFile.exists()) screenFile.readText(Charsets.UTF_8) else null } catch (_: Exception) { null }
+    fun saveScreen(json: String) { try { File(ctx.filesDir, "screen.json.tmp").apply { writeText(json, Charsets.UTF_8); renameTo(screenFile) } } catch (_: Exception) { } }
 
     fun ledger(): Ledger = Ledger(
         allSms(), limits(), learned(),

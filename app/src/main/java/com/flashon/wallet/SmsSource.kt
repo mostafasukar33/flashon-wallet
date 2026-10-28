@@ -16,13 +16,27 @@ object SmsSource {
     fun isWallet(sender: String, body: String) = Parser.walletOf(sender, Parser.normalize(body)) != null
 
     /** Reads every wallet message already in the phone's inbox. */
-    fun scanInbox(ctx: Context): Int {
+    private const val FULL_SCAN_VERSION = 2
+
+    /**
+     * full = read every wallet message in the phone (first run, "read again", after an update
+     * that needs it). Otherwise only the last few days, which is fast.
+     */
+    fun scanInbox(ctx: Context, full: Boolean = false): Int {
         if (!hasPermission(ctx)) return 0
+        val store = Store(ctx)
+        val doFull = full || store.getLong("fullScanV") < FULL_SCAN_VERSION
+        val since = if (doFull) 0L else (store.getLong("lastScan") - 3L * 24 * 3600 * 1000).coerceAtLeast(0L)
+        val startedAt = System.currentTimeMillis()
         val found = ArrayList<RawSms>()
+        val where = "(" + Telephony.Sms.DATE + " > ?) AND (" +
+            listOf("body LIKE '%كاش%'", "body LIKE '%cash%'", "body LIKE '%محفظ%'", "body LIKE '%wallet%'",
+                "address LIKE '%cash%'").joinToString(" OR ") + ")"
+        val args = arrayOf(since.toString())
         try {
             // all columns, because the SIM column name differs between phones (Samsung: sim_slot)
             ctx.contentResolver.query(
-                Telephony.Sms.Inbox.CONTENT_URI, null, null, null, Telephony.Sms.DATE + " ASC"
+                Telephony.Sms.Inbox.CONTENT_URI, null, where, args, Telephony.Sms.DATE + " ASC"
             )?.use { c ->
                 val ia = c.getColumnIndex(Telephony.Sms.ADDRESS)
                 val ib = c.getColumnIndex(Telephony.Sms.BODY)
@@ -39,7 +53,10 @@ object SmsSource {
                 }
             }
         } catch (_: Exception) { }
-        return Store(ctx).addSms(found, trustSim = true)
+        val added = store.addSms(found, trustSim = true)
+        store.putLong("lastScan", startedAt)
+        if (doFull) store.putLong("fullScanV", FULL_SCAN_VERSION.toLong())
+        return added
     }
 
     /**

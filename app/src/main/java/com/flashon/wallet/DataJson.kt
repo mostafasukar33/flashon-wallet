@@ -35,7 +35,7 @@ object DataJson {
         o.put("lines", lo)
         // SIM lines seen in the messages, line 1 first, with which wallets / numbers came on each
         val pl = JSONArray()
-        val parsedAll = store.allSms().mapNotNull { Parser.parse(it) }
+        val parsedAll = store.allSms().mapNotNull { Parser.parseCached(it) }
         for (line in led.phoneLines) {
             val mine = parsedAll.filter { it.sms.sim == line }
             pl.put(JSONObject().put("key", line).put("n", led.lineNumber(line))
@@ -68,15 +68,25 @@ object DataJson {
         val months = led.months()
         o.put("months", JSONArray(months.map { it.toString() }))
         val sums = JSONObject()
+        val all = led.allSummaries()
         for (m in months) {
             val mo = JSONObject()
-            for (acc in led.accounts) mo.put(acc.key, summary(led.summary(m, acc)))
+            val byAcc = all[m]
+            for (acc in led.accounts) {
+                val sm = byAcc?.get(acc.key) ?: run {
+                    // a month with no messages for this wallet: carry the balance forward
+                    val prev = all.keys.filter { it < m && all[it]?.get(acc.key) != null }.maxOrNull()
+                    val end = prev?.let { all[it]!![acc.key]!!.endBalance }
+                    MonthSummary(startBalance = end, endBalance = end)
+                }
+                mo.put(acc.key, summary(sm))
+            }
             sums.put(m.toString(), mo)
         }
         o.put("summaries", sums)
 
         val txs = JSONArray()
-        for (p in led.txs) txs.put(tx(led, p))
+        for (p in led.txs) txs.put(tx(led, p, withBody = false))
         o.put("txs", txs)
         val unk = JSONArray()
         for (p in led.unknown) unk.put(tx(led, p))
@@ -89,10 +99,10 @@ object DataJson {
         .put("start", d(s.startBalance)).put("end", d(s.endBalance))
         .put("received", s.received).put("sent", s.sent)
 
-    private fun tx(led: Ledger, p: Parsed) = JSONObject()
+    private fun tx(led: Ledger, p: Parsed, withBody: Boolean = true) = JSONObject()
         .put("id", p.sms.id).put("w", led.account(p).key).put("p", p.wallet.key).put("type", p.type.key).put("kind", p.kind)
         .put("amount", d(p.amount)).put("fee", p.fee).put("balance", d(p.balance))
         .put("phone", p.phone ?: JSONObject.NULL).put("name", led.displayName(p) ?: JSONObject.NULL)
         .put("smsName", p.smsName ?: JSONObject.NULL).put("time", p.sms.time)
-        .put("how", p.how).put("body", p.sms.body)
+        .put("how", p.how).apply { if (withBody) put("body", p.sms.body) }
 }
