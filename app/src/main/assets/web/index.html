@@ -264,11 +264,11 @@ function home(){
       '<span class="xs mute wsub">'+(n.hasData?(n.balance!=null?'رصيد · ':'')+'آخر رسالة '+shortF.format(new Date(n.lastTime)):'مفيش رسايل لسه')+'</span></button>';
   }).join('')+'</div>';
 
-  var sm=D.summaries[S.month]||{}, ws=S.filter==='all'?D.now.map(function(n){return n.w}):[S.filter], ti=0,to=0,tf=0;
-  ws.forEach(function(w){ var s=sm[w]; if(s){ti+=s.inTotal;to+=s.outTotal;tf+=s.fees;} });
+  var sm=D.summaries[S.month]||{}, ws=S.filter==='all'?D.now.map(function(n){return n.w}):[S.filter], ti=0,to=0,left=0;
+  ws.forEach(function(w){ var x=sm[w], n=nowOf(w); if(x){ti+=x.inTotal;to+=x.outTotal;} if(n && n.hasData){ left+=Math.max(0, limitsOf(n).monthSend-(x?x.sent:0)); } });
   h+='<div class="card sum3"><div><span class="small mute">وارد الشهر</span><b class="num in">+'+fmt(ti)+'</b></div>'+
      '<div><span class="small mute">صادر الشهر</span><b class="num out">−'+fmt(to)+'</b></div>'+
-     '<div><span class="small mute">رسوم</span><b class="num">'+fmt(tf)+'</b></div></div>';
+     '<div><span class="small mute">'+(S.month===D.months[0]?'فاضل تحويل':'كان فاضل')+'</span><b class="num">'+fmt(left)+'</b></div></div>';
 
   if (S.month===D.months[0]) {
     D.now.forEach(function(n){ if(n.hasData && (S.filter==='all'||S.filter===n.w)) h+=limitCard(n); });
