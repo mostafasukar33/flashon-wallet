@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>محافظي</title>
+<style>
+@font-face{font-family:Plex;src:url(fonts/IBMPlexSansArabic-Regular.ttf);font-weight:400}
+@font-face{font-family:Plex;src:url(fonts/IBMPlexSansArabic-SemiBold.ttf);font-weight:600}
+@font-face{font-family:Plex;src:url(fonts/IBMPlexSansArabic-Bold.ttf);font-weight:700}
+:root{
+  --bg:#F4F5F2;--card:#FFFFFF;--line:#E3E5DF;--line2:#D9DBD5;--ink:#16181B;--ink2:#33373C;--mute:#555A60;
+  --in:#0B6B3F;--in-bg:#DDEFE5;--out:#A33A1E;--out-bg:#F6E3DD;--day:#B5651D;--blue:#1E5AA8;
+  --warn-bg:#FFF4DB;--warn-line:#EBD39A;--warn-ink:#5C4300;--bad-bg:#FBE7E1;--bad-line:#E8B4A4;--bad-ink:#7A2410;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Plex,sans-serif;font-size:16px}
+body{padding-bottom:env(safe-area-inset-bottom)}
+button,input,select{font-family:inherit;color:inherit}
+.num{direction:ltr;unicode-bidi:isolate;font-variant-numeric:tabular-nums}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px 32px;display:flex;flex-direction:column;gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.col{display:flex;flex-direction:column;gap:6px}
+.mute{color:var(--mute)}
+.small{font-size:13px}.xs{font-size:12px}
+h1{margin:0;font-size:24px;font-weight:700}
+h2{margin:0;font-size:16px;font-weight:700}
+.pill{border:1px solid var(--line2);background:#fff;border-radius:999px;padding:8px 14px;min-height:40px;font-size:15px;font-weight:600}
+.icon-btn{width:44px;height:44px;border-radius:12px;border:1px solid var(--line2);background:#fff;display:flex;align-items:center;justify-content:center}
+.banner{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--blue);color:#fff;padding:12px 16px;font-size:15px}
+.banner button{background:#fff;color:var(--blue);border:0;border-radius:10px;padding:8px 14px;font-weight:700;min-height:40px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.wcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:4px;text-align:right}
+.wcard.sel{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink) inset}
+.big{font-size:23px;font-weight:700}
+.sum3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));text-align:center;padding:14px 4px}
+.sum3>div{display:flex;flex-direction:column;gap:4px}
+.sum3>div+div{border-right:1px solid var(--line)}
+.sum3 b{font-size:18px}
+.in{color:var(--in)}.out{color:var(--out)}
+.bar{height:8px;background:#ECEDE9;border-radius:4px;overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:4px}
+.lim{display:flex;flex-direction:column;gap:4px}
+.search{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line2);border-radius:12px;padding:0 14px;min-height:48px}
+.search input{border:0;outline:0;font-size:16px;flex:1;background:transparent;min-width:0}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1px solid var(--line2);background:#fff;border-radius:999px;padding:8px 16px;min-height:40px;font-size:15px}
+.chip.on{background:var(--ink);color:#fff;border-color:var(--ink);font-weight:600}
+.day{font-size:13px;font-weight:600;color:var(--mute);margin-top:4px}
+.tx{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px;width:100%;text-align:right}
+.dot{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none}
+.tx .mid{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.tx .who{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tx .amt{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
+.tx .amt b{font-size:17px}
+.warnlink{background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:12px;padding:14px;color:var(--warn-ink);font-weight:600;display:flex;justify-content:space-between;width:100%;font-size:15px}
+.alert{border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.alert.bad{background:var(--bad-bg);border:1px solid var(--bad-line);color:var(--bad-ink)}
+.alert.mid{background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink)}
+.alert.good{background:#E6F3EC;border:1px solid #B9DCC8;color:#0B4F2F}
+.alert b{font-size:16px}
+.calc .row{font-size:15px;padding:3px 0}
+.calc hr{border:0;border-top:1px solid var(--line);margin:4px 0;width:100%}
+.hl{background:#E6F3EC;border-radius:8px;padding:6px 8px!important}
+.back{background:none;border:0;font-size:16px;font-weight:600;color:var(--blue);padding:8px 0;min-height:44px;align-self:flex-start}
+.btn{border:0;border-radius:12px;min-height:50px;font-size:16px;font-weight:700;padding:0 18px}
+.btn.main{background:var(--blue);color:#fff}
+.btn.ghost{background:#fff;border:1px solid var(--line2)}
+.btn3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.btn3 button{border:0;border-radius:10px;min-height:48px;font-size:15px;font-weight:700}
+.b-in{background:var(--in-bg);color:var(--in)}.b-out{background:var(--out-bg);color:var(--out)}.b-no{background:#ECEDE9;color:var(--ink2)}
+.msg{font-size:14px;line-height:1.8;color:var(--ink2);background:var(--bg);border-radius:10px;padding:10px 12px;white-space:pre-wrap;word-break:break-word}
+.empty{text-align:center;color:var(--mute);padding:28px 8px;font-size:15px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:14px;font-weight:600}
+.field input[type=number],.field input[type=text]{border:1px solid var(--line2);border-radius:10px;min-height:48px;padding:0 12px;font-size:17px;background:#fff;width:100%}
+.switch{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px}
+.switch input{width:48px;height:28px;accent-color:var(--blue)}
+#sheetBg{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;z-index:10}
+#sheet{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-radius:18px 18px 0 0;max-height:88vh;overflow:auto;z-index:11;transform:translateY(105%);transition:transform .22s ease;padding-bottom:env(safe-area-inset-bottom)}
+#sheet.open{transform:none}
+#sheet .handle{width:44px;height:5px;border-radius:3px;background:#C9CCC5;margin:10px auto 0}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:10px;padding:10px 16px;font-size:14px;z-index:20;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+.logo{width:96px;height:96px;border-radius:24px;align-self:center}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="sheetBg"></div>
+<div id="sheet"></div>
+<div id="toast" class="toast"></div>
+<script>
+(function(){
+'use strict';
+
+/* ---------- bridge (real phone, or sample data in a browser) ---------- */
+var B = window.Android;
+if (!B) {
+  var mock = {
+    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:false,
+    settings:{monthReceive:200000,monthSend:200000,daySend:60000,dayReceiveOn:false,dayReceive:60000,feesCount:true},
+    update:{available:true,version:'2'},
+    months:['2026-10'],
+    now:[
+      {w:'vf',label:'فودافون كاش',hasData:true,balance:8713.70,lastTime:Date.parse('2026-10-25T17:12:00+03:00'),monthReceived:7000,monthSent:502.5,daySent:0,dayReceived:0,receiveLeft:193000,sendLeftMonth:199497.5,sendLeftDay:60000,receiveLeftDay:null,canSendNow:8713.70,locked:0},
+      {w:'et',label:'اتصالات كاش',hasData:false,balance:null,lastTime:null,monthReceived:0,monthSent:0,daySent:0,dayReceived:0,receiveLeft:200000,sendLeftMonth:200000,sendLeftDay:60000,receiveLeftDay:null,canSendNow:60000,locked:0}
+    ],
+    summaries:{'2026-10':{vf:{inTotal:7000,outTotal:500,fees:2.5,count:2,start:57432.2,end:8713.7,received:7000,sent:502.5},et:{inTotal:0,outTotal:0,fees:0,count:0,start:null,end:null,received:0,sent:0}}},
+    txs:[
+      {id:'1',w:'vf',type:'out',kind:'تحويل',amount:500,fee:2.5,balance:8713.70,phone:'011077762382',name:'011077762382',smsName:null,time:Date.parse('2026-10-25T17:12:00+03:00'),how:'words',body:'تم تحويل 500 جنيه لرقم 011077762382 مصاريف الخدمة 2.5 جنيه رصيد حسابك فى فودافون كاش الحالي 8713.70.'},
+      {id:'2',w:'vf',type:'in',kind:'استلام',amount:7000,fee:0,balance:64432.20,phone:'01018064481',name:'Mahmoud A Hemdan',smsName:'Mahmoud A Hemdan',time:Date.parse('2026-10-18T20:53:00+03:00'),how:'words',body:'تم استلام مبلغ 7000 جنيه من رقم 01018064481 المسجل بإسم Mahmoud A Hemdan على رقم محفظتك 01005174644.\nرصيدك الحالي: 64432.20 جنيه'}
+    ],
+    unknown:[{id:'9',w:'et',amount:150,fee:0,balance:null,phone:'01000000000',time:Date.parse('2026-10-27T13:40:00+03:00'),body:'رسالة تجربة شكلها مختلف بقيمة 150 جنيه'}]
+  };
+  B = {
+    getData:function(){return JSON.stringify(mock)},
+    requestSms:function(){mock.permission=true;setTimeout(App.reload,300)},
+    setType:function(id,t,learn){mock.unknown=mock.unknown.filter(function(u){return u.id!==id});setTimeout(App.reload,50)},
+    setName:function(p,n){mock.txs.forEach(function(t){if(t.phone===p)t.name=n||t.smsName||p});setTimeout(App.reload,50)},
+    saveSettings:function(j){mock.settings=JSON.parse(j);setTimeout(App.reload,50)},
+    openBattery:function(){mock.batteryOk=true;setTimeout(App.reload,50)},
+    rescan:function(){setTimeout(App.reload,300)},
+    checkUpdate:function(){setTimeout(function(){App.onUpdate(JSON.stringify(mock.update))},400)},
+    downloadUpdate:function(){toast('بينزل التحديث…')},
+    exitApp:function(){}
+  };
+}
+
+/* ---------- helpers ---------- */
+var D, S = {screen:'home', stack:[], month:null, filter:'all', q:'', wallet:'vf', phone:null, personAll:true};
+var $app = document.getElementById('app');
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function fmt(n){ if(n==null||isNaN(n)) return '—'; var r=Math.round(n*100)/100; var frac=Math.abs(r%1)>0.001; return r.toLocaleString('en-US',{minimumFractionDigits:frac?2:0,maximumFractionDigits:2}); }
+function fmt2(n){ if(n==null||isNaN(n)) return '—'; return (Math.round(n*100)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+var dayF, timeF, monF, shortF;
+try{
+  dayF=new Intl.DateTimeFormat('ar-EG-u-nu-latn',{weekday:'long',day:'numeric',month:'long'});
+  timeF=new Intl.DateTimeFormat('ar-EG-u-nu-latn',{hour:'numeric',minute:'2-digit'});
+  monF=new Intl.DateTimeFormat('ar-EG-u-nu-latn',{month:'long',year:'numeric'});
+  shortF=new Intl.DateTimeFormat('ar-EG-u-nu-latn',{day:'numeric',month:'long'});
+}catch(e){ var f={format:function(d){return d.toLocaleString()}}; dayF=timeF=monF=shortF=f; }
+function monthName(key){ var p=key.split('-'); return monF.format(new Date(+p[0],+p[1]-1,15)); }
+function monthKey(t){ var d=new Date(t); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2); }
+function dayKey(t){ var d=new Date(t); return d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate(); }
+function wname(w){ return w==='vf'?'فودافون':'اتصالات'; }
+function nowOf(w){ return D.now.filter(function(x){return x.w===w})[0]; }
+var ICON = {
+  gear:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  search:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#555A60" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
+  inA:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0B6B3F" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"/><path d="M6 13l6 6 6-6"/></svg>',
+  outA:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A33A1E" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>'
+};
+var LOGO = '<svg class="logo" viewBox="0 0 108 108" role="img" aria-label="محافظي"><rect width="108" height="108" rx="24" fill="#1E5AA8"/><rect x="31" y="27" width="40" height="14" rx="5" fill="#BFD3EE"/><rect x="24" y="35" width="60" height="42" rx="9" fill="#fff"/><rect x="62" y="49" width="24" height="15" rx="5" fill="#1E5AA8"/><circle cx="70" cy="56.5" r="3" fill="#fff"/><path d="M37 46v20M31.5 60.5L37 66l5.5-5.5" stroke="#1F9D5C" stroke-width="4.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M50 66V46M44.5 51.5L50 46l5.5 5.5" stroke="#E07B39" stroke-width="4.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+var toastT;
+function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(function(){t.classList.remove('show')},2200); }
+
+/* ---------- navigation ---------- */
+function go(screen, extra){ S.stack.push({screen:S.screen,wallet:S.wallet,phone:S.phone,scroll:window.scrollY}); S.screen=screen; for(var k in (extra||{})) S[k]=extra[k]; render(); window.scrollTo(0,0); }
+function back(){
+  if (document.getElementById('sheet').classList.contains('open')) { closeSheet(); return true; }
+  var p=S.stack.pop(); if(!p) return false;
+  S.screen=p.screen; S.wallet=p.wallet; S.phone=p.phone; render(); window.scrollTo(0,p.scroll||0); return true;
+}
+
+/* ---------- screens ---------- */
+function render(){
+  if (!D) return;
+  if (!D.permission) { $app.innerHTML = onboarding(); return; }
+  var h = S.screen==='limits'?limitsScreen(): S.screen==='person'?personScreen(): S.screen==='unknown'?unknownScreen(): S.screen==='settings'?settingsScreen(): home();
+  $app.innerHTML = h;
+  var q=document.getElementById('q'); if(q){ q.value=S.q; }
+}
+
+function onboarding(){
+  return '<div class="wrap" style="padding-top:48px;gap:20px">'+LOGO+
+  '<h1 style="text-align:center">أهلاً بيك في محافظي</h1>'+
+  '<div class="card col" style="gap:10px;font-size:16px;line-height:1.8">'+
+   '<span>التطبيق بيقرا رسايل <b>فودافون كاش</b> و<b>اتصالات كاش</b> اللي على موبايلك، وينظمها لوحده: الوارد والصادر والرصيد وحدود الشهر.</span>'+
+   '<span class="mute small">كل حاجة بتفضل جوه موبايلك، ومفيش رسالة بتطلع منه لأي حتة.</span>'+
+  '</div>'+
+  '<button class="btn main" data-act="perm">اسمح بقراية الرسايل</button>'+
+  '<span class="mute small" style="text-align:center">هيظهرلك سؤال من أندرويد، دوس "سماح".</span></div>';
+}
+
+function filteredTx(){
+  var q=S.q.trim().toLowerCase();
+  return D.txs.filter(function(t){
+    if (S.filter!=='all' && t.w!==S.filter) return false;
+    if (q) return ((t.name||'')+' '+(t.phone||'')+' '+(t.smsName||'')+' '+fmt(t.amount)+' '+t.amount).toLowerCase().indexOf(q)>=0;
+    return monthKey(t.time)===S.month;
+  }).sort(function(a,b){return b.time-a.time});
+}
+
+function txRow(t){
+  var isIn=t.type==='in';
+  return '<button class="tx" data-act="tx" data-id="'+esc(t.id)+'">'+
+    '<span class="dot" style="background:'+(isIn?'var(--in-bg)':'var(--out-bg)')+'">'+(isIn?ICON.inA:ICON.outA)+'</span>'+
+    '<span class="mid"><span class="who'+(t.name&&/^[0-9+]+$/.test(t.name)?' num':'')+'" style="text-align:right">'+esc(t.name||t.kind)+'</span>'+
+    '<span class="xs mute">'+esc(t.kind)+' · '+wname(t.w)+' · '+timeF.format(new Date(t.time))+'</span></span>'+
+    '<span class="amt"><b class="num '+(isIn?'in':'out')+'">'+(isIn?'+':'−')+fmt2(t.amount)+'</b>'+
+    '<span class="xs mute">'+(t.fee>0?'+ '+fmt(t.fee)+' رسوم':(t.balance!=null?'رصيد '+fmt(t.balance):''))+'</span></span></button>';
+}
+
+function txList(list){
+  if (!list.length) return '<div class="empty">'+(S.q?'مفيش نتايج للبحث ده':'مفيش عمليات في الشهر ده')+'</div>';
+  var out='', last='';
+  list.forEach(function(t){ var k=dayKey(t.time); if(k!==last){ out+='<div class="day">'+dayF.format(new Date(t.time))+'</div>'; last=k; } out+=txRow(t); });
+  return out;
+}
+
+function limitCard(n){
+  var st=D.settings;
+  function bar(label, used, max, color){
+    var pct=Math.min(100, max>0?used/max*100:0);
+    return '<div class="lim"><div class="row small"><span>'+label+'</span><span class="num">'+fmt(used)+' / '+fmt(max)+'</span></div>'+
+      '<div class="bar"><i style="width:'+pct.toFixed(1)+'%;min-width:'+(used>0?'3px':'0')+';background:'+color+'"></i></div></div>';
+  }
+  var line;
+  if (n.locked>0) line='<span class="small" style="color:var(--bad-ink);font-weight:700">'+fmt(n.locked)+' ج هيتقفل عليهم للشهر الجاي</span>';
+  else if (n.balance!=null && n.canSendNow < n.balance - 0.009) line='<span class="small" style="color:var(--warn-ink);font-weight:600">تقدر تحوّل دلوقتي '+fmt(n.canSendNow)+' بس (حد اليوم)</span>';
+  else line='<span class="small in" style="font-weight:600">تقدر تحوّل دلوقتي '+(n.balance!=null?fmt(n.canSendNow)+' (رصيدك كله)':fmt(n.canSendNow))+' ✓</span>';
+  return '<button class="card col" style="gap:10px;text-align:right;width:100%" data-act="limits" data-w="'+n.w+'">'+
+    '<div class="row"><h2>حدود '+esc(n.label)+' الشهر ده</h2><span class="small" style="color:var(--blue);font-weight:600">التفاصيل ←</span></div>'+
+    bar('استلام', n.monthReceived, st.monthReceive, 'var(--in)')+
+    bar('تحويل', n.monthSent, st.monthSend, 'var(--out)')+
+    bar('تحويل النهارده', n.daySent, st.daySend, 'var(--day)')+
+    (st.dayReceiveOn?bar('استلام النهارده', n.dayReceived, st.dayReceive, '#2E7D9A'):'')+
+    line+'</button>';
+}
+
+function home(){
+  var h='';
+  if (D.update && D.update.available) h+='<div class="banner"><span>فيه تحديث جديد للتطبيق</span><button data-act="dl">نزّله</button></div>';
+  h+='<div class="wrap">';
+  var opts=D.months.map(function(m){return '<option value="'+m+'"'+(m===S.month?' selected':'')+'>'+monthName(m)+'</option>'}).join('');
+  h+='<div class="row"><h1>محافظي</h1><div class="row" style="gap:8px">'+
+     '<select class="pill" id="month" aria-label="الشهر">'+opts+'</select>'+
+     '<button class="icon-btn" data-act="settings" aria-label="الإعدادات">'+ICON.gear+'</button></div></div>';
+
+  if (!D.batteryOk) h+='<div class="alert mid"><b>خطوة صغيرة كمان</b><span class="small" style="line-height:1.7">عشان التطبيق يلقط الرسايل وهو مقفول، اسمحله يشتغل في الخلفية.</span><button class="btn ghost" style="min-height:44px" data-act="battery">اسمحله</button></div>';
+
+  h+='<div class="grid2">'+D.now.map(function(n){
+    var sel=S.filter===n.w?' sel':'';
+    return '<button class="wcard'+sel+'" data-act="wallet" data-w="'+n.w+'"><span class="small mute">'+esc(n.label)+'</span>'+
+      (n.balance!=null?'<span class="big num" style="text-align:right">'+fmt2(n.balance)+'</span>':'<span class="big" style="color:#8A8F95">—</span>')+
+      '<span class="xs mute">'+(n.hasData?(n.balance!=null?'رصيد · ':'')+'آخر رسالة '+shortF.format(new Date(n.lastTime)):'مفيش رسايل لسه')+'</span></button>';
+  }).join('')+'</div>';
+
+  var sm=D.summaries[S.month]||{}, ws=S.filter==='all'?['vf','et']:[S.filter], ti=0,to=0,tf=0;
+  ws.forEach(function(w){ var s=sm[w]; if(s){ti+=s.inTotal;to+=s.outTotal;tf+=s.fees;} });
+  h+='<div class="card sum3"><div><span class="small mute">وارد الشهر</span><b class="num in">+'+fmt(ti)+'</b></div>'+
+     '<div><span class="small mute">صادر الشهر</span><b class="num out">−'+fmt(to)+'</b></div>'+
+     '<div><span class="small mute">رسوم</span><b class="num">'+fmt(tf)+'</b></div></div>';
+
+  if (S.month===D.months[0]) {
+    D.now.forEach(function(n){ if(n.hasData && (S.filter==='all'||S.filter===n.w)) h+=limitCard(n); });
+  }
+
+  h+='<label class="search">'+ICON.search+'<input id="q" placeholder="دوّر باسم أو رقم أو مبلغ" aria-label="بحث" inputmode="search"></label>';
+  h+='<div class="chips">'+[['all','الكل'],['vf','فودافون'],['et','اتصالات']].map(function(c){return '<button class="chip'+(S.filter===c[0]?' on':'')+'" data-act="filter" data-f="'+c[0]+'">'+c[1]+'</button>'}).join('')+'</div>';
+  if (S.q) h+='<span class="xs mute">نتايج البحث في كل الشهور</span>';
+  h+='<div class="col" style="gap:8px" id="list">'+txList(filteredTx())+'</div>';
+
+  if (D.unknown.length) h+='<button class="warnlink" data-act="unknown"><span>'+(D.unknown.length===1?'رسالة واحدة مش مفهومة':D.unknown.length+' رسايل مش مفهومة')+'، حددلها نوعها</span><span>←</span></button>';
+  h+='</div>';
+  return h;
+}
+
+function limitsScreen(){
+  var n=nowOf(S.wallet), st=D.settings, sm=(D.summaries[D.months[0]]||{})[S.wallet]||{};
+  var h='<div class="wrap"><button class="back" data-act="back">→ رجوع</button>';
+  h+='<div class="col" style="gap:4px"><h1>حدود '+esc(n.label)+'</h1><span class="small mute">'+monthName(D.months[0])+'</span><span class="small mute">الشهر: '+fmt(st.monthReceive)+' استلام و'+fmt(st.monthSend)+' تحويل<br>اليوم: '+fmt(st.daySend)+' تحويل</span></div>';
+  var canMonth = n.balance!=null?Math.min(n.balance,n.sendLeftMonth):n.sendLeftMonth;
+  if (n.locked>0) h+='<div class="alert bad"><b>'+fmt(n.locked)+' ج هيتقفل عليهم للشهر الجاي</b><span style="line-height:1.7">في المحفظة '+fmt(n.balance)+'، بس فاضلك تحوّل '+fmt(n.sendLeftMonth)+' بس الشهر ده. الباقي يتحوّل من أول الشهر الجاي.</span></div>';
+  else if (n.balance!=null && n.canSendNow < n.balance-0.009) h+='<div class="alert mid"><b>النهارده فاضلك تحوّل '+fmt(n.canSendNow)+' بس</b><span style="line-height:1.7">حد اليوم '+fmt(st.daySend)+'، وبيتجدد الساعة 12 بالليل.</span></div>';
+  else h+='<div class="alert good"><b>رصيدك كله تقدر تحوّله</b><span>مفيش فلوس متقفلة الشهر ده.</span></div>';
+
+  function big(label, used, max, color, note){
+    var pct=Math.min(100, max>0?used/max*100:0);
+    return '<div class="col"><div class="row" style="font-size:15px"><b style="font-weight:600">'+label+'</b><span class="num">'+fmt(used)+' / '+fmt(max)+'</span></div>'+
+     '<div class="bar" style="height:10px"><i style="width:'+pct.toFixed(1)+'%;min-width:'+(used>0?'3px':'0')+';background:'+color+'"></i></div><span class="small mute">'+note+'</span></div>';
+  }
+  h+='<div class="card col" style="gap:16px">'+
+    big('الاستلام', n.monthReceived, st.monthReceive, 'var(--in)', n.receiveLeft<=0?'<span style="color:var(--out);font-weight:600">وصلت الحد، مش هتقدر تستلم تاني الشهر ده</span>':'فاضلك تستلم '+fmt(n.receiveLeft)+' الشهر ده')+
+    big('التحويل', n.monthSent, st.monthSend, 'var(--out)', 'فاضلك '+fmt(n.sendLeftMonth)+' الشهر ده'+(st.feesCount?' (الرسوم محسوبة)':''))+
+    big('تحويل النهارده', n.daySent, st.daySend, 'var(--day)', 'فاضلك '+fmt(n.sendLeftDay)+' النهارده')+
+    (st.dayReceiveOn?big('استلام النهارده', n.dayReceived, st.dayReceive, '#2E7D9A', 'فاضلك '+fmt(n.receiveLeftDay)+' النهارده'):'')+
+  '</div>';
+
+  h+='<div class="card col calc" style="gap:4px"><h2 style="margin-bottom:6px">الحسبة</h2>'+
+    '<div class="row"><span>رصيد أول الشهر</span><span class="num">'+fmt(sm.start)+'</span></div>'+
+    '<div class="row in"><span>استلمت</span><span class="num">+'+fmt(sm.inTotal||0)+'</span></div>'+
+    '<div class="row out"><span>حوّلت</span><span class="num">−'+fmt(sm.outTotal||0)+'</span></div>'+
+    ((sm.fees||0)>0?'<div class="row out"><span>رسوم</span><span class="num">−'+fmt(sm.fees)+'</span></div>':'')+
+    '<hr><div class="row" style="font-weight:700"><span>الرصيد دلوقتي</span><span class="num">'+fmt(n.balance)+'</span></div>'+
+    '<div class="row in" style="font-weight:700"><span>تقدر تحوّل الشهر ده</span><span class="num">'+fmt(canMonth)+'</span></div>'+
+    '<div class="row in hl" style="font-weight:700"><span>تقدر تحوّل دلوقتي</span><span class="num">'+fmt(n.canSendNow)+'</span></div>'+
+    '<div class="row" style="font-weight:700;color:var(--bad-ink)"><span>متقفل للشهر الجاي</span><span class="num">'+fmt(n.locked)+'</span></div>'+
+  '</div>';
+
+  h+='<div class="card col" style="gap:8px;font-size:14px;line-height:1.7"><h2>التنبيهات اللي هتجيلك</h2>'+
+    '<span>• لما الاستلام يعدّي '+fmt(st.monthReceive*0.75)+': فاضلك كام تستلم</span>'+
+    '<span>• لما تقفل حد الاستلام</span>'+
+    '<span>• أول ما يبقى فيه فلوس هتتقفل للشهر الجاي</span>'+
+    '<span>• لما تحويل اليوم يقرب من '+fmt(st.daySend)+'</span>'+
+    '<span>• أول الشهر: الحد اتفتح من جديد</span></div>';
+  return h+'</div>';
+}
+
+function personScreen(){
+  var p=S.phone, all=D.txs.filter(function(t){return t.phone===p}).sort(function(a,b){return b.time-a.time});
+  var name=(all[0]&&all[0].name)||p, smsName=(all.filter(function(t){return t.smsName})[0]||{}).smsName;
+  var list=S.personAll?all:all.filter(function(t){return monthKey(t.time)===D.months[0]});
+  var ti=0,to=0; list.forEach(function(t){ if(t.type==='in') ti+=t.amount; else to+=t.amount; });
+  var h='<div class="wrap"><button class="back" data-act="back">→ رجوع</button>';
+  h+='<div class="col" style="gap:4px"><div class="row"><h1 class="'+(/^[0-9+]+$/.test(name)?'num':'')+'">'+esc(name)+'</h1><button class="pill" data-act="rename">غيّر الاسم</button></div>'+
+     '<span class="num mute" style="text-align:right">'+esc(p)+'</span>'+(smsName&&smsName!==name?'<span class="xs mute">الاسم في الرسايل: '+esc(smsName)+'</span>':'')+'</div>';
+  h+='<div class="card sum3"><div><span class="small mute">بعتلي</span><b class="num in">+'+fmt(ti)+'</b></div><div><span class="small mute">بعتله</span><b class="num out">−'+fmt(to)+'</b></div><div><span class="small mute">عمليات</span><b>'+list.length+'</b></div></div>';
+  h+='<div class="chips"><button class="chip'+(S.personAll?' on':'')+'" data-act="pall" data-v="1">من الأول</button><button class="chip'+(!S.personAll?' on':'')+'" data-act="pall" data-v="0">الشهر ده</button></div>';
+  h+='<div class="col" style="gap:8px">'+txList(list)+'</div></div>';
+  return h;
+}
+
+function unknownScreen(){
+  var h='<div class="wrap"><button class="back" data-act="back">→ رجوع</button><div class="col"><h1>رسايل مش مفهومة</h1><span class="small mute" style="line-height:1.7">الرسايل دي مش متحسبة لحد ما تحدد نوعها. هتحددها مرة، والتطبيق يتعلمها للرسايل اللي شبهها.</span></div>';
+  if (!D.unknown.length) return h+'<div class="empty">مفيش رسايل مستنية ✓</div></div>';
+  D.unknown.slice().sort(function(a,b){return b.time-a.time}).forEach(function(u){
+    h+='<div class="card col" style="gap:12px"><div class="row xs mute"><span>'+(u.w==='vf'?'فودافون كاش':'اتصالات كاش')+'</span><span>'+dayF.format(new Date(u.time))+' · '+timeF.format(new Date(u.time))+'</span></div>'+
+      '<div class="msg">'+esc(u.body)+'</div>'+
+      '<div class="row small" style="justify-content:flex-start;gap:16px"><span>المبلغ: <b class="num">'+fmt(u.amount)+'</b></span>'+(u.phone?'<span>الرقم: <b class="num">'+esc(u.phone)+'</b></span>':'')+'</div>'+
+      '<b style="font-size:15px">دي إيه؟</b><div class="btn3"><button class="b-in" data-act="settype" data-id="'+esc(u.id)+'" data-t="in" data-learn="1">وارد</button><button class="b-out" data-act="settype" data-id="'+esc(u.id)+'" data-t="out" data-learn="1">صادر</button><button class="b-no" data-act="settype" data-id="'+esc(u.id)+'" data-t="ignore" data-learn="1">تجاهل</button></div>'+
+      '<span class="xs mute">"تجاهل" للرسايل اللي مش عمليات، زي العروض.</span></div>';
+  });
+  return h+'</div>';
+}
+
+function settingsScreen(){
+  var st=D.settings;
+  function num(id,label,v){ return '<div class="field"><label for="'+id+'">'+label+'</label><input class="num" style="text-align:right" type="number" inputmode="decimal" id="'+id+'" value="'+v+'"></div>'; }
+  var h='<div class="wrap"><button class="back" data-act="back">→ رجوع</button><h1>الإعدادات</h1>';
+  h+='<div class="card col" style="gap:14px"><h2>الحدود (للمحفظتين)</h2>'+
+    num('s_mr','حد الاستلام في الشهر',st.monthReceive)+num('s_ms','حد التحويل في الشهر',st.monthSend)+num('s_ds','حد التحويل في اليوم',st.daySend)+
+    '<label class="switch"><span style="font-size:15px">الرسوم بتتحسب من الحد</span><input type="checkbox" id="s_fee"'+(st.feesCount?' checked':'')+'></label>'+
+    '<label class="switch"><span style="font-size:15px">فيه حد يومي للاستلام كمان</span><input type="checkbox" id="s_dro"'+(st.dayReceiveOn?' checked':'')+'></label>'+
+    num('s_dr','حد الاستلام في اليوم',st.dayReceive)+
+    '<button class="btn main" data-act="save">احفظ</button></div>';
+  h+='<div class="card col" style="gap:10px"><h2>التشغيل في الخلفية</h2><span class="small mute" style="line-height:1.7">'+(D.batteryOk?'التطبيق مسموحله يشتغل في الخلفية ✓':'التطبيق ممكن يتقفل لوحده عشان البطارية، فممكن تتأخر التنبيهات.')+'</span>'+
+     (D.batteryOk?'':'<button class="btn ghost" data-act="battery">اسمحله يشتغل في الخلفية</button>')+'</div>';
+  h+='<div class="card col" style="gap:10px"><h2>الرسايل</h2><span class="small mute" style="line-height:1.7">لو حاسس إن فيه عملية ناقصة، خلي التطبيق يقرا كل الرسايل من الأول.</span><button class="btn ghost" data-act="rescan">اقرا الرسايل من جديد</button></div>';
+  h+='<div class="card col" style="gap:10px"><h2>التطبيق</h2><span class="small mute">النسخة '+esc(D.version)+'</span><button class="btn ghost" data-act="chkupd">شوف فيه تحديث</button></div>';
+  return h+'</div>';
+}
+
+/* ---------- sheets ---------- */
+function openSheet(html){ var s=document.getElementById('sheet'); s.innerHTML='<div class="handle"></div><div class="wrap">'+html+'</div>'; document.getElementById('sheetBg').style.display='block'; requestAnimationFrame(function(){s.classList.add('open')}); }
+function closeSheet(){ var s=document.getElementById('sheet'); s.classList.remove('open'); document.getElementById('sheetBg').style.display='none'; }
+
+function txSheet(id){
+  var t=D.txs.filter(function(x){return x.id===id})[0]; if(!t) return;
+  var isIn=t.type==='in';
+  var h='<div class="row"><b class="num '+(isIn?'in':'out')+'" style="font-size:26px">'+(isIn?'+':'−')+fmt2(t.amount)+'</b><span class="pill" style="display:inline-flex;align-items:center">'+esc(t.kind)+'</span></div>'+
+    '<div class="col small" style="gap:8px">'+
+    (t.phone?'<div class="row"><span class="mute">'+(isIn?'من':'لـ')+'</span><span>'+esc(t.name)+(t.name!==t.phone?' · <span class="num">'+esc(t.phone)+'</span>':'')+'</span></div>':'')+
+    '<div class="row"><span class="mute">المحفظة</span><span>'+(t.w==='vf'?'فودافون كاش':'اتصالات كاش')+'</span></div>'+
+    '<div class="row"><span class="mute">الوقت</span><span>'+dayF.format(new Date(t.time))+' · '+timeF.format(new Date(t.time))+'</span></div>'+
+    (t.fee>0?'<div class="row"><span class="mute">رسوم</span><span class="num">'+fmt(t.fee)+'</span></div>':'')+
+    (t.balance!=null?'<div class="row"><span class="mute">الرصيد بعدها</span><span class="num">'+fmt2(t.balance)+'</span></div>':'')+
+    '</div><div class="msg">'+esc(t.body)+'</div>';
+  if (t.phone) h+='<button class="btn ghost" data-act="person" data-p="'+esc(t.phone)+'">كل عمليات '+esc(t.name)+'</button>';
+  h+='<span class="small mute">النوع غلط؟ صححه:</span><div class="btn3"><button class="b-in" data-act="settype" data-id="'+esc(t.id)+'" data-t="in">وارد</button><button class="b-out" data-act="settype" data-id="'+esc(t.id)+'" data-t="out">صادر</button><button class="b-no" data-act="settype" data-id="'+esc(t.id)+'" data-t="ignore">مش عملية</button></div>';
+  openSheet(h);
+}
+
+function renameSheet(){
+  var p=S.phone, t=D.txs.filter(function(x){return x.phone===p})[0]||{};
+  openSheet('<h2>اسم الرقم <span class="num">'+esc(p)+'</span></h2><div class="field"><label for="nm">الاسم اللي يظهر</label><input type="text" id="nm" value="'+esc(t.name&&t.name!==p?t.name:'')+'" placeholder="مثلاً: محمود - عميل"></div>'+
+    '<button class="btn main" data-act="savename">احفظ</button><span class="xs mute">لو سبته فاضي، يرجع للاسم اللي في الرسايل.</span>');
+  setTimeout(function(){var i=document.getElementById('nm'); if(i) i.focus();},250);
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click', function(e){
+  if (e.target.id==='sheetBg') { closeSheet(); return; }
+  var el=e.target.closest('[data-act]'); if(!el) return;
+  var a=el.getAttribute('data-act');
+  switch(a){
+    case 'perm': B.requestSms(); break;
+    case 'battery': B.openBattery(); break;
+    case 'settings': go('settings'); break;
+    case 'back': back(); break;
+    case 'wallet': S.filter = S.filter===el.dataset.w?'all':el.dataset.w; render(); break;
+    case 'filter': S.filter=el.dataset.f; render(); break;
+    case 'limits': go('limits',{wallet:el.dataset.w}); break;
+    case 'unknown': go('unknown'); break;
+    case 'tx': txSheet(el.dataset.id); break;
+    case 'person': closeSheet(); go('person',{phone:el.dataset.p, personAll:true}); break;
+    case 'pall': S.personAll=el.dataset.v==='1'; render(); break;
+    case 'rename': renameSheet(); break;
+    case 'savename': B.setName(S.phone, document.getElementById('nm').value.trim()); closeSheet(); toast('اتحفظ'); break;
+    case 'settype':
+      B.setType(el.dataset.id, el.dataset.t, el.dataset.learn==='1'); closeSheet();
+      toast(el.dataset.t==='ignore'?'اتشالت من الحساب':'اتسجلت '+(el.dataset.t==='in'?'وارد':'صادر')); break;
+    case 'save':
+      var v=function(id){var x=parseFloat(document.getElementById(id).value); return isNaN(x)?0:x;};
+      B.saveSettings(JSON.stringify({monthReceive:v('s_mr'),monthSend:v('s_ms'),daySend:v('s_ds'),dayReceiveOn:document.getElementById('s_dro').checked,dayReceive:v('s_dr'),feesCount:document.getElementById('s_fee').checked}));
+      toast('اتحفظ'); break;
+    case 'rescan': B.rescan(); toast('بيقرا الرسايل…'); break;
+    case 'chkupd': B.checkUpdate(); toast('بيشوف…'); break;
+    case 'dl': B.downloadUpdate(); toast('بينزل التحديث…'); break;
+  }
+});
+document.addEventListener('change', function(e){ if(e.target.id==='month'){ S.month=e.target.value; render(); } });
+var qT;
+document.addEventListener('input', function(e){
+  if(e.target.id!=='q') return;
+  S.q=e.target.value; clearTimeout(qT);
+  qT=setTimeout(function(){ var l=document.getElementById('list'); if(l) l.innerHTML=txList(filteredTx()); },120);
+});
+
+/* ---------- entry points used by the phone ---------- */
+window.App = {
+  reload: function(){
+    try { D=JSON.parse(B.getData()); } catch(e){ return; }
+    if (!S.month || D.months.indexOf(S.month)<0) S.month=D.months[0];
+    if (S.screen==='person' && !D.txs.some(function(t){return t.phone===S.phone})) { S.screen='home'; S.stack=[]; }
+    var y=window.scrollY; render(); window.scrollTo(0,y);
+  },
+  back: back,
+  onUpdate: function(j){
+    var u=JSON.parse(j); D.update=u; render();
+    toast(u.available?'فيه تحديث جديد':(u.error?'مقدرتش أشوف، اتأكد من النت':'عندك آخر نسخة ✓'));
+  }
+};
+App.reload();
+})();
+</script>
+</body>
+</html>
