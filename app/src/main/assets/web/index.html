@@ -530,6 +530,15 @@ function applyData(json){
   try { D=JSON.parse(json); } catch(e){ return; }
   if (!S.month || D.months.indexOf(S.month)<0) S.month=D.months[0];
   if (S.filter!=='all' && !D.now.some(function(n){return n.w===S.filter})) S.filter='all';
+  // on opening, show the wallet that can send the most right now (by its limits)
+  if (!S.picked) {
+    var ws=D.now.filter(function(n){return n.hasData});
+    if (ws.length>1) {
+      var best=ws.reduce(function(b,n){ var r=Math.min(n.sendLeftMonth,n.sendLeftDay), rb=Math.min(b.sendLeftMonth,b.sendLeftDay); return r>rb?n:b; });
+      S.filter=best.w;
+    }
+    if (ws.length) S.picked=true;
+  }
   if (S.screen==='limits' && !nowOf(S.wallet)) { S.screen='home'; S.stack=[]; }
   if (S.screen==='person' && !D.txs.some(function(t){return t.phone===S.phone})) { S.screen='home'; S.stack=[]; }
   // don't redraw under an open sheet or while typing; it would close it / lose the text
