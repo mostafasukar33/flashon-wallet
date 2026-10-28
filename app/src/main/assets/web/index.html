@@ -34,6 +34,11 @@ h2{margin:0;font-size:16px;font-weight:700}
 .wcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:4px;text-align:right}
 .wcard.sel{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink) inset}
 .big{font-size:23px;font-weight:700}
+.walletsbar{position:sticky;top:0;z-index:5;background:var(--bg);margin:-8px -16px;padding:8px 16px;transition:box-shadow .15s}
+.walletsbar.stuck{box-shadow:0 6px 12px -10px rgba(0,0,0,.35)}
+.walletsbar.stuck .wsub{display:none}
+.walletsbar.stuck .wcard{padding:9px 12px;gap:0}
+.walletsbar.stuck .big{font-size:20px}
 .sum3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));text-align:center;padding:14px 4px}
 .sum3>div{display:flex;flex-direction:column;gap:4px}
 .sum3>div+div{border-right:1px solid var(--line)}
@@ -99,7 +104,7 @@ h2{margin:0;font-size:16px;font-weight:700}
 var B = window.Android;
 if (!B) {
   var mock = {
-    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:false, txNotify:true, lines:{}, seen:{'1':['vf']},
+    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:false, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
     settings:{monthReceive:200000,monthSend:200000,daySend:60000,dayReceiveOn:false,dayReceive:60000,feesCount:true},
     update:{available:true,version:'2'},
     months:['2026-10'],
@@ -249,11 +254,11 @@ function home(){
 
   if (!D.batteryOk) h+='<div class="alert mid"><b>خطوة صغيرة كمان</b><span class="small" style="line-height:1.7">عشان التطبيق يلقط الرسايل وهو مقفول، اسمحله يشتغل في الخلفية.</span><button class="btn ghost" style="min-height:44px" data-act="battery">اسمحله</button></div>';
 
-  h+='<div class="grid2">'+D.now.map(function(n){
+  h+='<div id="wsent" style="height:0"></div><div class="grid2 walletsbar" id="wallets">'+D.now.map(function(n){
     var sel=S.filter===n.w?' sel':'';
-    return '<button class="wcard'+sel+'" data-act="wallet" data-w="'+n.w+'"><span class="small mute">'+esc(n.label)+'</span>'+(n.own?'<span class="xs mute num" style="text-align:right">'+esc(n.own)+'</span>':'')+
+    return '<button class="wcard'+sel+'" data-act="wallet" data-w="'+n.w+'"><span class="small mute">'+esc(n.label)+'</span>'+(n.own?'<span class="xs mute num wsub" style="text-align:right">'+esc(n.own)+'</span>':'')+
       (n.balance!=null?'<span class="big num" style="text-align:right">'+fmt2(n.balance)+'</span>':'<span class="big" style="color:#8A8F95">—</span>')+
-      '<span class="xs mute">'+(n.hasData?(n.balance!=null?'رصيد · ':'')+'آخر رسالة '+shortF.format(new Date(n.lastTime)):'مفيش رسايل لسه')+'</span></button>';
+      '<span class="xs mute wsub">'+(n.hasData?(n.balance!=null?'رصيد · ':'')+'آخر رسالة '+shortF.format(new Date(n.lastTime)):'مفيش رسايل لسه')+'</span></button>';
   }).join('')+'</div>';
 
   var sm=D.summaries[S.month]||{}, ws=S.filter==='all'?D.now.map(function(n){return n.w}):[S.filter], ti=0,to=0,tf=0;
@@ -357,15 +362,16 @@ function settingsScreen(){
       '<div class="col" style="gap:4px">'+D.now.map(function(n){return '<span style="font-size:15px">• '+esc(n.label)+(n.own?' <span class="num mute small">'+esc(n.own)+'</span>':'')+'</span>'}).join('')+'</div>'+
       '<button class="btn ghost" data-act="editlines">حددها بنفسي</button><span class="xs mute" style="line-height:1.6">مثلاً لو مفيش اتصالات كاش على الموبايل ده، أو فيه خطين فودافون.</span>';
   } else {
-    var seen=D.seen||{};
-    var guess=function(l){ if(lines[l]) return lines[l]; if(Object.keys(lines).length) return ''; var w=(seen[l]||[])[0]; if(w) return w; return l==='1'?'vf':''; };
-    ['1','2'].forEach(function(l){
-      var v=guess(l), saw=(seen[l]||[]).map(function(w){return w==='vf'?'فودافون كاش':'اتصالات كاش'}).join(' و');
-      h+='<div class="field"><label for="ln'+l+'">خط '+l+' (شريحة '+l+')</label><select id="ln'+l+'" class="pill" style="width:100%;text-align:right;min-height:48px;border-radius:10px">'+
+    var pls=(D.phoneLines&&D.phoneLines.length)?D.phoneLines:[{key:'1',n:'1',wallets:[],own:[]},{key:'2',n:'2',wallets:[],own:[]}];
+    var hasCfg=Object.keys(lines).length>0;
+    pls.forEach(function(pl){
+      var v = lines[pl.key]!=null?lines[pl.key]:(lines[pl.n]!=null?lines[pl.n]:(hasCfg?'':(pl.wallets[0]||'')));
+      var saw=pl.wallets.map(function(w){return w==='vf'?'فودافون كاش':'اتصالات كاش'}).join(' و');
+      h+='<div class="field"><label for="ln_'+esc(pl.key)+'">خط '+esc(pl.n)+(pl.own.length?' · <span class="num">'+esc(pl.own.join(' / '))+'</span>':'')+'</label><select id="ln_'+esc(pl.key)+'" data-line="'+esc(pl.key)+'" class="pill lnsel" style="width:100%;text-align:right;min-height:48px;border-radius:10px">'+
         [['','مفيش محفظة'],['vf','فودافون كاش'],['et','اتصالات كاش']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===v?' selected':'')+'>'+o[1]+'</option>'}).join('')+
-        '</select><span class="xs mute">'+(saw?'جالها رسايل من '+saw:'مجالهاش رسايل محافظ لسه')+'</span></div>';
+        '</select><span class="xs mute">'+(saw?'جالها رسايل '+saw:'مجالهاش رسايل محافظ لسه')+'</span></div>';
     });
-    if (seen['?']) h+='<span class="xs mute" style="line-height:1.6">فيه رسايل الموبايل مكتبش جت على أنهي خط، هتتحسب على أول محفظة من نفس الشركة.</span>';
+    if (D.noLine) h+='<span class="xs mute" style="line-height:1.6">فيه رسايل قديمة الموبايل مكتبش جت على أنهي خط، هتتحسب على أول محفظة من نفس الشركة.</span>';
     h+='<button class="btn main" data-act="savelines">احفظ</button><button class="btn ghost" data-act="autolines">خليه يعرفها لوحده</button>';
   }
   h+='</div>';
@@ -469,7 +475,7 @@ document.addEventListener('click', function(e){
     case 'resetacclim': B.setAccountLimits(el.dataset.w, 'null'); closeSheet(); toast('رجعت للحدود العادية'); break;
     case 'editlines': S.editLines=true; render(); break;
     case 'savelines':
-      var m={}; ['1','2'].forEach(function(l){ var v=document.getElementById('ln'+l).value; if(v) m[l]=v; });
+      var m={}; Array.prototype.forEach.call(document.querySelectorAll('.lnsel'),function(x){ if(x.value) m[x.getAttribute('data-line')]=x.value; });
       if (!Object.keys(m).length) { toast('اختار محفظة واحدة على الأقل'); break; }
       S.editLines=false; B.setLines(JSON.stringify(m)); toast('اتحفظ'); break;
     case 'autolines': S.editLines=false; B.setLines('null'); toast('رجع يعرفها لوحده'); break;
@@ -488,6 +494,13 @@ document.addEventListener('click', function(e){
     case 'dl': B.downloadUpdate(); toast('بينزل التحديث…'); break;
   }
 });
+function stickCheck(){
+  var w=document.getElementById('wallets'), m=document.getElementById('wsent'); if(!w||!m) return;
+  var t=m.getBoundingClientRect().top, was=w.classList.contains('stuck');
+  var on = was ? t < 4 : t < -12;   // a little slack so it doesn't flicker
+  if(on!==was) w.classList.toggle('stuck',on);
+}
+window.addEventListener('scroll', stickCheck, {passive:true});
 document.addEventListener('change', function(e){ if(e.target.id==='month'){ S.month=e.target.value; render(); } if(e.target.id==='s_txn'){ B.setTxNotify(e.target.checked); toast(e.target.checked?'هيجيلك إشعار مع كل عملية':'الإشعارات دي اتقفلت'); } });
 var qT;
 document.addEventListener('input', function(e){
@@ -504,7 +517,7 @@ window.App = {
     if (S.filter!=='all' && !D.now.some(function(n){return n.w===S.filter})) S.filter='all';
     if (S.screen==='limits' && !nowOf(S.wallet)) { S.screen='home'; S.stack=[]; }
     if (S.screen==='person' && !D.txs.some(function(t){return t.phone===S.phone})) { S.screen='home'; S.stack=[]; }
-    var y=window.scrollY; render(); window.scrollTo(0,y);
+    var y=window.scrollY; render(); window.scrollTo(0,y); stickCheck();
   },
   back: back,
   onUpdate: function(j){

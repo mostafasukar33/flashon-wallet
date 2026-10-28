@@ -42,21 +42,16 @@ object SmsSource {
         return Store(ctx).addSms(found, trustSim = true)
     }
 
-    /** "1" / "2" for SIM slot 1 / 2 when known, otherwise "s<subscription>" or "". */
+    /**
+     * Which SIM a message came on. The subscription id is used first because both the inbox
+     * and new messages report it the same way; the slot number only when there is no id.
+     * The app shows them as line 1 / line 2 by their order.
+     */
     fun simKey(ctx: Context, slot: Int, sub: Int): String {
+        if (sub >= 0) return "s$sub"
         if (slot in 0..3) return (slot + 1).toString()
-        if (sub >= 0) {
-            val fromSub = slotOfSub(ctx, sub)
-            if (fromSub in 0..3) return (fromSub + 1).toString()
-            return "s$sub"
-        }
         return ""
     }
-
-    private fun slotOfSub(ctx: Context, sub: Int): Int = try {
-        val sm = ctx.getSystemService(android.telephony.SubscriptionManager::class.java)
-        sm?.getActiveSubscriptionInfo(sub)?.simSlotIndex ?: -1
-    } catch (_: Exception) { -1 }
 }
 
 /** Catches a new SMS the moment it arrives, even when the app is closed. */

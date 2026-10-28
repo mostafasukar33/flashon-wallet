@@ -100,7 +100,7 @@ fun main() {
     )
     val lt = Ledger(two, Limits(), Learned(), z, t("2026-11-04T12:00:00+02:00"))
     val l1 = lt.now(Account(Wallet.VODAFONE, "1")); val l2 = lt.now(Account(Wallet.VODAFONE, "2"))
-    check("two lines accounts", lt.accounts.map { it.key } == listOf("vf1", "vf2", "et"), lt.accounts)
+    check("two lines accounts, no empty etisalat", lt.accounts.map { it.key } == listOf("vf1", "vf2"), lt.accounts)
     check("line1 balance", l1.balance == 149000.0 && l1.monthReceived == 150000.0 && l1.ownNumber == "01011111111", l1)
     check("line2 balance", l2.balance == 100000.0 && l2.monthReceived == 100000.0 && l2.monthSent == 0.0, l2)
     check("line label", lt.accountLabel(Account(Wallet.VODAFONE, "2")) == "فودافون كاش – خط 2", lt.accountLabel(Account(Wallet.VODAFONE, "2")))
@@ -122,6 +122,21 @@ fun main() {
     val ls = Ledger(mix, Limits(), Learned(), z, t("2026-11-04T12:00:00+02:00"), lines = mapOf("1" to Wallet.VODAFONE), accountLimits = mapOf("vf1" to small))
     val ns = ls.now(Account(Wallet.VODAFONE, "1"))
     check("own limits", ns.receiveLeft == 3950.0 && ns.canSendNow == 1050.0 && ns.sendLeftDay == 2000.0, ns)
+
+    // Phone reports subscription ids instead of 1/2; user picks "line 1 = VF, line 2 = VF"
+    val subs = listOf(
+        RawSms("u1", "VF-Cash", "تم استلام مبلغ 100 جنيه من رقم 01000000001 على رقم محفظتك 01031819017. رصيدك الحالي: 100 جنيه", t("2026-11-02T10:00:00+02:00"), "s3"),
+        RawSms("u2", "VF-Cash", "تم استلام مبلغ 200 جنيه من رقم 01000000002 على رقم محفظتك 01064063446. رصيدك الحالي: 200 جنيه", t("2026-11-02T11:00:00+02:00"), "s5"),
+        RawSms("u3", "VF-Cash", "تم استلام مبلغ 5 جنيه من رقم 01000000003 على رقم محفظتك 01064063446. رصيدك الحالي: 205 جنيه", t("2026-11-02T12:00:00+02:00"), "s5")
+    )
+    val lsub = Ledger(subs, Limits(), Learned(), z, t("2026-11-04T12:00:00+02:00"), lines = mapOf("1" to Wallet.VODAFONE, "2" to Wallet.VODAFONE))
+    check("sub ids kept apart", lsub.accounts.map { it.key } == listOf("vfs3", "vfs5") &&
+        lsub.now(lsub.accounts[0]).balance == 100.0 && lsub.now(lsub.accounts[1]).balance == 205.0, lsub.accounts)
+    check("sub label", lsub.accountLabel(lsub.accounts[1]) == "فودافون كاش – خط 2", lsub.accountLabel(lsub.accounts[1]))
+    val lsub2 = Ledger(subs, Limits(), Learned(), z, t("2026-11-04T12:00:00+02:00"), lines = mapOf("s3" to Wallet.VODAFONE, "s5" to Wallet.VODAFONE))
+    check("sub keys direct", lsub2.now(lsub2.accounts[1]).balance == 205.0)
+    val lauto = Ledger(subs, Limits(), Learned(), z, t("2026-11-04T12:00:00+02:00"))
+    check("auto sub split", lauto.accounts.size == 2 && lauto.accountLabel(lauto.accounts[0]) == "فودافون كاش – خط 1", lauto.accounts)
 
     println(if (fails == 0) "ALL PASSED" else "$fails FAILED")
 }

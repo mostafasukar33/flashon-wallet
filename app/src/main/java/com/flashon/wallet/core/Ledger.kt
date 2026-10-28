@@ -65,8 +65,11 @@ data class WalletNow(
  *        Empty = work it out from the messages.
  * accountLimits: limits the user set for one wallet (account key -> Limits); others use [limits].
  */
+/** "1" < "2" < "s3" < "s10": by the number inside, then by text */
+val LINE_ORDER: Comparator<String> = compareBy<String>({ it.startsWith("s") }, { it.filter { c -> c.isDigit() }.toLongOrNull() ?: Long.MAX_VALUE }, { it })
+
 class Ledger(
-    raws: List<RawSms>,
+    private val raws: List<RawSms>,
     val limits: Limits,
     val learned: Learned,
     val zone: ZoneId = ZoneId.systemDefault(),
@@ -89,30 +92,43 @@ class Ledger(
             .sortedBy { it.sms.time }
 
         val acc = ArrayList<Account>()
+        // SIM lines seen in the messages, in a stable order (line 1 first)
+        val seenLines = parsed.map { it.sms.sim }.filter { it.isNotBlank() }.distinct().sortedWith(LINE_ORDER)
         if (lines.isNotEmpty()) {
-            // The user said which wallet is on which line
-            for ((line, w) in lines.entries.sortedBy { it.key }) acc += Account(w, line)
+            // The user said which wallet is on which line. A key like "2" that no message uses
+            // means "the 2nd line the phone reports".
+            fun real(k: String): String =
+                if (k in seenLines) k
+                else k.toIntOrNull()?.let { n -> seenLines.getOrNull(n - 1) } ?: k
+            for ((line, w) in lines.entries.sortedWith(compareBy(LINE_ORDER) { it.key })) {
+                val a = Account(w, real(line))
+                if (acc.none { it.key == a.key }) acc += a
+            }
             val keep = ArrayList<Parsed>()
             for (p in parsed) {
                 val a = acc.firstOrNull { it.wallet == p.wallet && it.line == p.sms.sim }
-                    ?: acc.firstOrNull { it.wallet == p.wallet }
-                    ?: continue // a wallet the user doesn't have on this phone
+                    ?: (if (p.sms.sim.isBlank()) acc.firstOrNull { it.wallet == p.wallet } else null)
+                    ?: continue // a wallet / line the user said isn't used for this
                 accountOf[p.sms.id] = a
                 keep += p
             }
             parsed = keep
             for (a in acc) if (acc.count { it.wallet == a.wallet } > 1) multiLine += a.wallet
-        } else for (w in Wallet.values()) {
-            val mine = parsed.filter { it.wallet == w }
-            val lines = mine.map { it.sms.sim }.filter { it.isNotBlank() }.distinct().sorted()
-            if (lines.size >= 2) {
-                multiLine += w
-                for (l in lines) acc += Account(w, l)
-                for (p in mine) accountOf[p.sms.id] = Account(w, p.sms.sim.ifBlank { lines.first() })
-            } else {
-                val a = Account(w, "")
-                acc += a
-                for (p in mine) accountOf[p.sms.id] = a
+        } else {
+            val any = parsed.isNotEmpty()
+            for (w in Wallet.values()) {
+                val mine = parsed.filter { it.wallet == w }
+                if (mine.isEmpty() && any) continue // don't show a wallet that never sent a message
+                val ls = mine.map { it.sms.sim }.filter { it.isNotBlank() }.distinct().sortedWith(LINE_ORDER)
+                if (ls.size >= 2) {
+                    multiLine += w
+                    for (l in ls) acc += Account(w, l)
+                    for (p in mine) accountOf[p.sms.id] = Account(w, p.sms.sim.ifBlank { ls.first() })
+                } else {
+                    val a = Account(w, "")
+                    acc += a
+                    for (p in mine) accountOf[p.sms.id] = a
+                }
             }
         }
         accounts = acc
@@ -146,6 +162,17 @@ class Ledger(
         unknown = parsed.filter { it.type == TxType.UNKNOWN }
     }
 
+    /** all SIM lines the messages came on, line 1 first */
+    val phoneLines: List<String> by lazy {
+        raws.map { it.sim }.filter { it.isNotBlank() }.distinct().sortedWith(LINE_ORDER)
+    }
+
+    /** "1", "2"... as the user would count the SIMs */
+    fun lineNumber(line: String): String {
+        val i = phoneLines.indexOf(line)
+        return if (i >= 0) (i + 1).toString() else line.filter { it.isDigit() }.ifBlank { "?" }
+    }
+
     fun limitsFor(a: Account): Limits = accountLimits[a.key] ?: limits
 
     fun account(p: Parsed): Account = accountOf[p.sms.id] ?: Account(p.wallet, "")
@@ -153,10 +180,7 @@ class Ledger(
     fun accountLabel(a: Account): String {
         learned.accountNames[a.key]?.takeIf { it.isNotBlank() }?.let { return it }
         if (a.wallet !in multiLine) return a.wallet.label
-        val same = accounts.filter { it.wallet == a.wallet }.map { it.line }
-        val n = same.indexOf(a.line) + 1
-        val shown = if (a.line.all { it.isDigit() }) a.line else n.toString()
-        return a.wallet.label + " – خط " + shown
+        return a.wallet.label + " – خط " + lineNumber(a.line)
     }
 
     fun monthOf(t: Long): YearMonth = YearMonth.from(Instant.ofEpochMilli(t).atZone(zone))

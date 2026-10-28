@@ -33,16 +33,17 @@ object DataJson {
         val lines = store.lines()
         val lo = JSONObject(); for ((k, w) in lines) lo.put(k, w.key)
         o.put("lines", lo)
-        val seen = JSONObject()
-        for (r in store.allSms()) {
-            val w = Parser.walletOf(r.sender, Parser.normalize(r.body)) ?: continue
-            val k = r.sim.ifBlank { "?" }
-            val arr = seen.optJSONArray(k) ?: JSONArray().also { seen.put(k, it) }
-            var has = false
-            for (i in 0 until arr.length()) if (arr.getString(i) == w.key) has = true
-            if (!has) arr.put(w.key)
+        // SIM lines seen in the messages, line 1 first, with which wallets / numbers came on each
+        val pl = JSONArray()
+        val parsedAll = store.allSms().mapNotNull { Parser.parse(it) }
+        for (line in led.phoneLines) {
+            val mine = parsedAll.filter { it.sms.sim == line }
+            pl.put(JSONObject().put("key", line).put("n", led.lineNumber(line))
+                .put("wallets", JSONArray(mine.map { it.wallet.key }.distinct()))
+                .put("own", JSONArray(mine.mapNotNull { it.own }.distinct())))
         }
-        o.put("seen", seen)
+        o.put("phoneLines", pl)
+        o.put("noLine", parsedAll.any { it.sms.sim.isBlank() })
 
         val now = JSONArray()
         for (acc in led.accounts) {
