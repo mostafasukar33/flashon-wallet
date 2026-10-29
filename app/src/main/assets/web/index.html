@@ -272,9 +272,9 @@ function home(){
   var canNow=0, bal=0, leftM=0, locked=0;
   act.forEach(function(n){ canNow+=n.canSendNow; bal+=(n.balance||0); leftM+=n.sendLeftMonth; locked+=n.locked; });
   if (act.length) {
-    h+='<div class="hero"><span class="lbl">'+(act.length>1?'تقدر تحوّل دلوقتي من '+(act.length===2?'المحفظتين':'كل المحافظ'):'تقدر تحوّل دلوقتي')+'</span>'+
-      '<span class="amt num" style="text-align:right">'+fmt2(canNow)+'</span>'+
-      '<div class="sub"><div><span>الرصيد كله</span><b class="num" style="text-align:right">'+fmt2(bal)+'</b></div>'+
+    h+='<div class="hero"><span class="lbl">'+(act.length>1?'إجمالي '+(act.length===2?'المحفظتين':'المحافظ'):'رصيد المحفظة')+'</span>'+
+      '<span class="amt num" style="text-align:right">'+fmt2(bal)+'</span>'+
+      '<div class="sub"><div><span>تقدر تحوّل دلوقتي</span><b class="num" style="text-align:right">'+fmt2(canNow)+'</b></div>'+
       '<div><span>فاضل تحويل الشهر ده</span><b class="num" style="text-align:right">'+fmt(leftM)+'</b></div></div>'+
       (locked>0.5?'<div class="lock">'+fmt(locked)+' ج هيتقفلوا للشهر الجاي</div>':'')+'</div>';
   }
