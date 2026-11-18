@@ -23,10 +23,14 @@ const HEAD = '<meta name="robots" content="noindex,nofollow">' +
   '<meta name="theme-color" content="#F4F5F2">' +
   '<link rel="apple-touch-icon" href="/icon.png">' +
   '<link rel="icon" href="/icon.png">' +
-  '<link rel="manifest" href="/manifest.webmanifest">';
+  '';
 
-const MANIFEST = JSON.stringify({
-  name: 'محافظي', short_name: 'محافظي', lang: 'ar', dir: 'rtl', start_url: '/', scope: '/', display: 'standalone',
+// The home-screen icon on the iPhone opens start_url only (no #, and its own storage, apart from Safari),
+// so each link gets its own manifest that opens /v/<id>.<salt> (both public: the password is the secret).
+const LINK = /^\/v\/([A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22})$/;
+const MLINK = /^\/m\/([A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22})\.webmanifest$/;
+const manifest = (start) => JSON.stringify({
+  name: 'محافظي', short_name: 'محافظي', lang: 'ar', dir: 'rtl', id: start, start_url: start, scope: '/', display: 'standalone',
   background_color: '#F4F5F2', theme_color: '#F4F5F2',
   icons: [{ src: '/icon.png', sizes: '192x192', type: 'image/png' }]
 });
@@ -198,11 +202,17 @@ export default {
 
     if (p === '/sw.js') return new Response(SW, { headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY } });
     if (p === '/icon.png') return new Response(ICON, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' } });
-    if (p === '/manifest.webmanifest') return new Response(MANIFEST, { headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'public, max-age=3600' } });
+    const ml = p.match(MLINK);
+    if (p === '/manifest.webmanifest' || ml) return new Response(manifest(ml ? '/v/' + ml[1] : '/'), { headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'public, max-age=3600' } });
 
-    if (p === '/' || p === '/index.html') {
+    const lk = p.match(LINK);
+    if (p === '/' || p === '/index.html' || lk) {
       const page = await env.ASSETS.fetch(new Request(new URL('/', url), { method: 'GET' }));
-      const res = new HTMLRewriter().on('head', { element(e) { e.append(HEAD + VIEW, { html: true }); } }).transform(page);
+      const mf = '<link rel="manifest" href="' + (lk ? '/m/' + lk[1] + '.webmanifest' : '/manifest.webmanifest') + '">';
+      const res = new HTMLRewriter().on('head', { element(e) {
+        e.prepend('<base href="/">', { html: true });          // fonts/… stay at the root under /v/…
+        e.append(HEAD + mf + VIEW, { html: true });
+      } }).transform(page);
       return new Response(res.body, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY } });
     }
     return env.ASSETS.fetch(req);

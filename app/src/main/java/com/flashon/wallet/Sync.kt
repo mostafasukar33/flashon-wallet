@@ -39,7 +39,7 @@ object Sync {
     fun link(store: Store): String? {
         val id = store.getStr("sync_id") ?: return null
         val salt = store.getStr("sync_salt") ?: return null
-        return "$HOST/#$id.$salt"
+        return "$HOST/v/$id.$salt"
     }
 
     fun state(store: Store): JSONObject = JSONObject()

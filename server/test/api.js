@@ -112,8 +112,15 @@ const sample = (balance) => ({ t: Date.now() - 120000, data: {
     const br = await chromium.launch();
     const ctx = await br.newContext({...devices['iPhone 13']});
     const pg = await ctx.newPage(); const errs = []; pg.on('pageerror', e => errs.push(String(e)));
-    await pg.goto(U + '/#' + L.id + '.' + L.salt);
+    const fonts = []; pg.on('response', r => { if (r.url().includes('/fonts/')) fonts.push(r.status()); });
+    await pg.goto(U + '/#' + L.id + '.' + L.salt);   // اللينك القديم بـ # بيتحول لوحده
     await pg.waitForSelector('#vpwi');
+    eq('اللينك بقى في العنوان نفسه', new URL(pg.url()).pathname, '/v/' + L.id + '.' + L.salt);
+    const mhref = await pg.getAttribute('link[rel=manifest]', 'href');
+    eq('ملف الأيقونة خاص باللينك ده', mhref, '/m/' + L.id + '.' + L.salt + '.webmanifest');
+    eq('أيقونة الشاشة الرئيسية بتفتح نفس اللينك', (await (await fetch(U + mhref)).json()).start_url, '/v/' + L.id + '.' + L.salt);
+    await pg.waitForTimeout(300);
+    eq('الخطوط بتتحمل جوه /v/', fonts.length > 0 && fonts.every(x => x === 200), true);
     eq('بيطلب الباسورد الأول', (await pg.innerText('body')).includes('8,713.70'), false);
     await pg.fill('#vpwi', 'wrongpass'); await pg.click('#vpwb');
     await pg.waitForFunction(() => document.getElementById('vpwm') && document.getElementById('vpwm').textContent, null, {timeout: 15000});
@@ -126,6 +133,12 @@ const sample = (balance) => ({ t: Date.now() - 120000, data: {
     eq('مكتوب آخر تحديث', /آخر تحديث من الموبايل/.test(txt), true);
     eq('مفيش زرار إعدادات', await pg.isVisible('[data-act=settings]'), false);
     eq('الباسورد نفسه مش محفوظ', await pg.evaluate(() => JSON.stringify(localStorage).includes('secret123')), false);
+    // زي أيقونة الآيفون: بتفتح /v/… في مكان تخزين لوحده، فبيطلب الباسورد مرة واحدة ويفتح
+    const p3 = await (await br.newContext({...devices['iPhone 13']})).newPage();
+    await p3.goto(U + '/v/' + L.id + '.' + L.salt); await p3.waitForSelector('#vpwi');
+    await p3.fill('#vpwi', 'secret123'); await p3.click('#vpwb');
+    await p3.waitForFunction(() => document.body.innerText.includes('8,713.70'), null, {timeout: 15000}).catch(() => {});
+    eq('من الأيقونة بيفتح بالباسورد', (await p3.innerText('body')).includes('8,713.70'), true);
     await pg.reload(); await pg.waitForFunction(() => document.body.innerText.includes('8,713.70'), null, {timeout: 15000}).catch(() => {});
     eq('المرة التانية بيفتح من غير باسورد', (await pg.innerText('body')).includes('8,713.70'), true);
     await pg.click('[data-act=tx]'); await pg.waitForTimeout(400);

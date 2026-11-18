@@ -20,9 +20,12 @@ body{padding-bottom:64px}
   function lset(k,v){ try{ if(ls) ls.setItem(k,v); }catch(e){} }
   function ldel(k){ try{ if(ls) ls.removeItem(k); }catch(e){} }
 
-  var h=(location.hash||'').slice(1);
-  if (/^[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}$/.test(h)) { if (lget('wv_link')!==h) forget(); lset('wv_link',h); }
-  else { h=lget('wv_link')||''; if (h) try{ history.replaceState(null,'','#'+h); }catch(e){} }
+  // the link: /v/<id>.<salt> (what the home-screen icon opens), or the older /#<id>.<salt>
+  var LK=/^[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}$/;
+  var pm=location.pathname.match(/^\/v\/([^/]+)$/), h=pm?pm[1]:(location.hash||'').slice(1);
+  if (!pm && LK.test(h)) { window.WalletView={viewOnly:true,getCached:function(){return ''},getData:function(){return ''},refresh:function(){}}; location.replace('/v/'+h); return; }
+  if (LK.test(h)) { if (lget('wv_link')!==h) forget(); lset('wv_link',h); }
+  else { h=lget('wv_link')||''; if (h) try{ history.replaceState(null,'','/v/'+h); }catch(e){} }
   var parts=h.split('.'), id=parts[0], salt=parts[1];
 
   function unb64(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='='; var b=atob(s), u=new Uint8Array(b.length); for(var i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
