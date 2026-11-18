@@ -1,0 +1,55 @@
+/* Service worker for w.flashoneg.com: shows the notification the Android sent, unlocked here with
+   the key the page saved after the password (the server only passes scrambled bytes along). */
+'use strict';
+self.addEventListener('install', function () { self.skipWaiting(); });
+self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim()); });
+
+function savedKey() {
+  return new Promise(function (ok) {
+    try {
+      var r = indexedDB.open('wv', 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('k'); };
+      r.onerror = function () { ok(null); };
+      r.onsuccess = function () {
+        try {
+          var g = r.result.transaction('k').objectStore('k').get('key');
+          g.onsuccess = function () { ok(g.result || null); };
+          g.onerror = function () { ok(null); };
+        } catch (e) { ok(null); }
+      };
+    } catch (e) { ok(null); }
+  });
+}
+function unb64(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; var b = atob(s), u = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+
+function unlock(buf) {
+  var u = new Uint8Array(buf);
+  if (u[0] !== 2) return Promise.reject(new Error('ver'));
+  return savedKey().then(function (k64) {
+    if (!k64) throw new Error('nokey');
+    return crypto.subtle.importKey('raw', unb64(k64), { name: 'AES-GCM' }, false, ['decrypt']);
+  }).then(function (k) {
+    return crypto.subtle.decrypt({ name: 'AES-GCM', iv: u.slice(1, 13) }, k, u.slice(13));
+  }).then(function (plain) { return JSON.parse(new TextDecoder().decode(plain)); });
+}
+
+self.addEventListener('push', function (e) {
+  var data = e.data ? e.data.arrayBuffer() : new ArrayBuffer(0);
+  e.waitUntil(unlock(data).then(function (msgs) {
+    return Promise.all(msgs.map(function (m) {
+      return self.registration.showNotification(m.title, { body: m.body, tag: m.tag, icon: '/icon.png', badge: '/icon.png', lang: 'ar', dir: 'rtl', data: { url: '/' } });
+    }));
+  }, function () {
+    return self.registration.showNotification('محافظي', { body: 'فيه عملية جديدة، افتح عشان تشوفها', icon: '/icon.png', data: { url: '/' } });
+  }).then(function () {
+    return self.clients.matchAll({ type: 'window' }).then(function (cs) { cs.forEach(function (c) { c.postMessage('pull'); }); });
+  }));
+});
+
+self.addEventListener('notificationclick', function (e) {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (cs) {
+    for (var i = 0; i < cs.length; i++) if ('focus' in cs[i]) { cs[i].postMessage('pull'); return cs[i].focus(); }
+    return self.clients.openWindow('/');
+  }));
+});

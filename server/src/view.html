@@ -1,28 +1,46 @@
 <style>
-#vnote{position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;justify-content:center;pointer-events:none;padding:0 12px calc(10px + env(safe-area-inset-bottom))}
-#vnote span{pointer-events:auto;background:rgba(22,24,27,.86);color:#fff;font-size:13px;border-radius:999px;padding:7px 14px;line-height:1.5;text-align:center}
-#vnote.bad span{background:#A33A1E}
-body{padding-bottom:56px}
+#vnote{position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;padding:0 12px calc(10px + env(safe-area-inset-bottom))}
+#vnote>*{pointer-events:auto}
+#vnote .n{background:rgba(22,24,27,.86);color:#fff;font-size:13px;border-radius:999px;padding:7px 14px;line-height:1.5;text-align:center}
+#vnote.bad .n{background:#A33A1E}
+#vnote .p{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #D9DBD5;border-radius:14px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.12);font-size:14px;line-height:1.6;max-width:520px;width:100%}
+#vnote .p button{border:0;border-radius:10px;min-height:40px;padding:0 14px;font-weight:700;font-family:inherit;font-size:14px}
+#vnote .p .go{background:#1E5AA8;color:#fff;white-space:nowrap}
+#vnote .p .x{background:transparent;color:#555A60;padding:0 6px}
+body{padding-bottom:64px}
 </style>
 <script>
-/* Read-only window on the Android app: the link carries <id>.<key> after #, the key never reaches the server. */
+/* Read-only window on the Android app. The link carries <id>.<salt> after #; the password turns it into the key
+   (PBKDF2, same rounds as Sync.kt) right here. Neither the password nor the key ever goes to the server. */
 (function(){
   'use strict';
+  var ROUNDS=150000;
   var ls=null; try{ ls=window.localStorage; ls.getItem('x'); }catch(e){ ls=null; }
   function lget(k){ try{ return ls?ls.getItem(k):null; }catch(e){ return null; } }
   function lset(k,v){ try{ if(ls) ls.setItem(k,v); }catch(e){} }
   function ldel(k){ try{ if(ls) ls.removeItem(k); }catch(e){} }
 
   var h=(location.hash||'').slice(1);
-  if (/^[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/.test(h)) { if (lget('wv_link')!==h) { ldel('wv_blob'); ldel('wv_at'); } lset('wv_link',h); }
+  if (/^[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}$/.test(h)) { if (lget('wv_link')!==h) forget(); lset('wv_link',h); }
   else { h=lget('wv_link')||''; if (h) try{ history.replaceState(null,'','#'+h); }catch(e){} }
-  var parts=h.split('.'), id=parts[0], k64=parts[1];
+  var parts=h.split('.'), id=parts[0], salt=parts[1];
 
   function unb64(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='='; var b=atob(s), u=new Uint8Array(b.length); for(var i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
-  function tob64(u){ var s='', C=0x8000; for(var i=0;i<u.length;i+=C) s+=String.fromCharCode.apply(null,u.subarray(i,i+C)); return btoa(s); }
+  function b64(u){ u=new Uint8Array(u); var s='', C=0x8000; for(var i=0;i<u.length;i+=C) s+=String.fromCharCode.apply(null,u.subarray(i,i+C)); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+  function cat(a,b){ var o=new Uint8Array(a.length+b.length); o.set(a); o.set(b,a.length); return o; }
 
-  var keyP=null;
+  /* the key, kept on this iPhone after the password was right once (the service worker needs it for notifications) */
+  var k64=lget('wv_k'), proof=lget('wv_p'), keyP=null;
+  function idb(fn){ try{ var r=indexedDB.open('wv',1); r.onupgradeneeded=function(){ r.result.createObjectStore('k'); }; r.onsuccess=function(){ try{ var t=r.result.transaction('k','readwrite'); fn(t.objectStore('k')); }catch(e){} }; }catch(e){} }
+  function remember(k,p){ k64=k; proof=p; keyP=null; lset('wv_k',k); lset('wv_p',p); idb(function(s){ s.put(k,'key'); }); }
+  function forget(){ k64=null; proof=null; keyP=null; ['wv_k','wv_p','wv_blob','wv_at'].forEach(ldel); idb(function(s){ s.delete('key'); }); }
   function key(){ return keyP || (keyP=crypto.subtle.importKey('raw', unb64(k64), {name:'AES-GCM'}, false, ['decrypt'])); }
+  function derive(pw){
+    return crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits'])
+      .then(function(k){ return crypto.subtle.deriveBits({name:'PBKDF2', hash:'SHA-256', salt:unb64(salt), iterations:ROUNDS}, k, 256); })
+      .then(function(bits){ var raw=new Uint8Array(bits);
+        return crypto.subtle.digest('SHA-256', cat(raw, new TextEncoder().encode('sub'))).then(function(d){ return {k:b64(raw), p:b64(d)}; }); });
+  }
   function open(buf){
     var u=new Uint8Array(buf);
     if (u[0]!==1) return Promise.reject(new Error('ver'));
@@ -39,8 +57,41 @@ body{padding-bottom:56px}
     note();
   }
 
-  var ago;
-  try{ ago=new Intl.RelativeTimeFormat('ar-EG-u-nu-latn',{numeric:'auto'}); }catch(e){ ago=null; }
+  /* ---------- password screen ---------- */
+  function pwScreen(msg){
+    var app=document.getElementById('app'); if(!app) return;
+    app.innerHTML='<form class="wrap" id="vpw" style="padding-top:16vh;gap:16px;align-items:stretch">'+
+      '<div style="display:flex;justify-content:center"><img src="/icon.png" width="72" height="72" alt="" style="border-radius:18px"></div>'+
+      '<h1 style="text-align:center">محافظي</h1>'+
+      '<span class="mute" style="text-align:center;line-height:1.8;font-size:15px">اكتب الباسورد اللي عملته في التطبيق على الأندرويد. هتكتبه مرة واحدة بس على الموبايل ده.</span>'+
+      '<div class="field"><label for="vpwi">الباسورد</label><input id="vpwi" type="password" autocomplete="current-password" dir="ltr" style="text-align:left" required></div>'+
+      '<span id="vpwm" class="small" style="color:var(--out);min-height:20px;text-align:center">'+(msg||'')+'</span>'+
+      '<button class="btn main" id="vpwb" type="submit">افتح</button></form>';
+    document.getElementById('vpw').addEventListener('submit', function(e){
+      e.preventDefault();
+      var pw=document.getElementById('vpwi').value, b=document.getElementById('vpwb'), m=document.getElementById('vpwm');
+      if (!pw) return;
+      b.disabled=true; b.textContent='بيفتح…'; m.textContent='';
+      derive(pw).then(function(r){
+        return fetch('/api/s/'+id, {cache:'no-store', headers:{'X-Sub':r.p}}).then(function(res){
+          if (res.status===403) throw new Error('الباسورد غلط');
+          if (res.status===429) throw new Error('جربت كتير، استنى ساعة وجرب تاني');
+          if (res.status===404) throw new Error('اللينك ده اتقفل أو اتغير من التطبيق');
+          if (!res.ok) throw new Error('مفيش نت، جرب تاني');
+          var nat=res.headers.get('X-At')||'';
+          return res.arrayBuffer().then(function(buf){
+            remember(r.k, r.p);
+            return open(buf).then(function(w){ at=nat; lset('wv_at',at); keep(buf); state=''; show(w); pushSetup(); });
+          });
+        });
+      }).catch(function(err){ b.disabled=false; b.textContent='افتح'; m.textContent=err.message||'حصلت مشكلة'; });
+    });
+  }
+
+  function keep(buf){ if (buf.byteLength < 3000000) lset('wv_blob', b64(buf)); }
+
+  /* ---------- notes at the bottom ---------- */
+  var ago; try{ ago=new Intl.RelativeTimeFormat('ar-EG-u-nu-latn',{numeric:'auto'}); }catch(e){ ago=null; }
   function since(t){
     var s=Math.round((t-Date.now())/1000), a=Math.abs(s);
     if (!ago) return new Date(t).toLocaleString();
@@ -49,35 +100,75 @@ body{padding-bottom:56px}
     if (a<86400) return ago.format(Math.round(s/3600),'hour');
     return ago.format(Math.round(s/86400),'day');
   }
+  var pushMsg='';
   function note(){
-    var n=document.getElementById('vnote'); if(!n){ if(!document.body) return; n=document.createElement('div'); n.id='vnote'; n.innerHTML='<span></span>'; document.body.appendChild(n); }
+    if (!document.body) return;
+    var n=document.getElementById('vnote');
+    if (!n){ n=document.createElement('div'); n.id='vnote'; document.body.appendChild(n); }
     var msg = state==='gone' ? 'اللينك ده اتقفل أو اتغير من التطبيق'
-      : state==='badkey' ? 'اللينك ناقص أو متغير، انسخه تاني من التطبيق'
       : state==='old' ? 'المتصفح ده قديم، حدّث الآيفون أو افتحه في سفاري'
+      : !k64 ? ''
       : !stamp ? (state==='net'?'مفيش نت':'بيجيب الحساب…')
       : 'آخر تحديث من الموبايل '+since(stamp)+(state==='net'?' · مفيش نت دلوقتي':'');
-    n.className=(state&&state!=='net')||(state==='net'&&!stamp)?'bad':'';
-    n.firstChild.textContent=msg;
+    n.className=(state==='gone'||state==='old'||(state==='net'&&!stamp))?'bad':'';
+    n.innerHTML=(pushMsg?'<div class="p">'+pushMsg+'</div>':'')+(msg?'<span class="n"></span>':'');
+    if (msg) n.querySelector('.n').textContent=msg;
   }
 
+  /* ---------- fetching ---------- */
   function pull(){
-    if (!id || busy) return; busy=true;
-    fetch('/api/s/'+id+(at&&last?'?since='+encodeURIComponent(at):''), {cache:'no-store'}).then(function(r){
+    if (!id || !k64 || busy) return; busy=true;
+    fetch('/api/s/'+id+(at&&last?'?since='+encodeURIComponent(at):''), {cache:'no-store', headers:{'X-Sub':proof}}).then(function(r){
       if (r.status===204) { state=''; return null; }
       if (r.status===404) { state='gone'; ldel('wv_blob'); return null; }
+      if (r.status===403) { forget(); last=''; stamp=0; pwScreen(); return null; }
       if (!r.ok) throw new Error('http');
       var nat=r.headers.get('X-At')||'';
       return r.arrayBuffer().then(function(buf){
-        return open(buf).then(function(w){
-          state=''; at=nat; lset('wv_at',at);
-          if (buf.byteLength < 3000000) lset('wv_blob', tob64(new Uint8Array(buf)));
-          show(w);
-        }, function(){ state='badkey'; });
+        return open(buf).then(function(w){ state=''; at=nat; lset('wv_at',at); keep(buf); show(w); }, function(){ forget(); pwScreen(); });
       });
     }).catch(function(){ state='net'; }).then(function(){ busy=false; note(); });
   }
 
-  function noop(){ var t=document.getElementById('toast'); if(!t) return; t.textContent='التعديل من الموبايل الأندرويد بس'; t.classList.add('show'); setTimeout(function(){t.classList.remove('show')},2200); }
+  /* ---------- notifications (iPhone: only from the home-screen icon, iOS 16.4+) ---------- */
+  var standalone = window.navigator.standalone===true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  var isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+  var canPush = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  function pushSetup(){
+    if (!k64) return;
+    if (canPush) navigator.serviceWorker.register('/sw.js').catch(function(){});
+    if (lget('wv_nopush')) { pushMsg=''; note(); return; }
+    if (isIOS && !standalone) {
+      pushMsg='<span style="flex:1">عشان يجيلك إشعار مع كل عملية: من زرار المشاركة اختار <b>Add to Home Screen</b>، وافتحه من الأيقونة.</span><button class="x" data-v="x" aria-label="اقفل">✕</button>';
+    } else if (!canPush) { pushMsg=''; }
+    else if (Notification.permission==='granted') { pushMsg=''; subscribe(false); }
+    else if (Notification.permission==='denied') { pushMsg=''; }
+    else pushMsg='<span style="flex:1">يجيلك إشعار أول ما فلوس تدخل أو تخرج؟</span><button class="go" data-v="on">شغّل الإشعارات</button><button class="x" data-v="x" aria-label="مش دلوقتي">✕</button>';
+    note();
+  }
+  function subscribe(loud){
+    return navigator.serviceWorker.register('/sw.js').then(function(){ return navigator.serviceWorker.ready; }).then(function(reg){
+      return reg.pushManager.getSubscription().then(function(s){
+        if (s) return s;
+        return fetch('/api/key').then(function(r){ return r.json(); }).then(function(j){
+          return reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:unb64(j.key)});
+        });
+      });
+    }).then(function(s){
+      return fetch('/api/s/'+id+'/sub', {method:'POST', headers:{'X-Sub':proof,'Content-Type':'application/json'}, body:JSON.stringify(s.toJSON())});
+    }).then(function(r){ if (loud) toastMsg(r.ok?'الإشعارات اشتغلت ✓':'مقدرتش أشغلها، جرب تاني'); })
+      .catch(function(){ if (loud) toastMsg('مقدرتش أشغل الإشعارات'); });
+  }
+  document.addEventListener('click', function(e){
+    var b=e.target.closest && e.target.closest('#vnote [data-v]'); if(!b) return;
+    if (b.getAttribute('data-v')==='x') { lset('wv_nopush','1'); pushMsg=''; note(); return; }
+    Notification.requestPermission().then(function(p){
+      pushMsg=''; note();
+      if (p==='granted') subscribe(true); else toastMsg('الإشعارات اتقفلت، تقدر تفتحها من إعدادات الآيفون');
+    });
+  });
+
+  function toastMsg(m){ var t=document.getElementById('toast'); if(!t) return; t.textContent=m; t.classList.add('show'); setTimeout(function(){t.classList.remove('show')},2400); }
   var base={
     viewOnly:true,
     getCached:function(){ return ''; },
@@ -85,22 +176,24 @@ body{padding-bottom:56px}
     refresh:function(){ pull(); },
     getBody:function(x){ return bodies[x]||''; }
   };
-  window.WalletView = (typeof Proxy==='function') ? new Proxy(base,{get:function(t,p){ return p in t ? t[p] : noop; }}) : base;
+  window.WalletView = (typeof Proxy==='function') ? new Proxy(base,{get:function(t,p){ return p in t ? t[p] : function(){ toastMsg('التعديل من الموبايل الأندرويد بس'); }; }}) : base;
 
   function start(){
-    if (!id || !k64) {
+    if (!id || !salt) {
       document.getElementById('app').innerHTML='<div class="wrap" style="padding-top:22vh;gap:14px;text-align:center;align-items:center"><h1>محافظي</h1><span class="mute" style="line-height:1.8;font-size:16px">افتح اللينك اللي في التطبيق على الأندرويد:<br>الإعدادات ← شوفه من موبايل تاني</span></div>';
       return;
     }
     if (!(window.crypto&&crypto.subtle&&window.DecompressionStream)) { state='old'; note(); return; }
-    note();
-    var cached=lget('wv_blob');
-    if (cached) { try{ open(unb64(cached.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')).buffer).then(function(w){ if(!last) show(w); }, function(){}); }catch(e){} }
-    // App.reload() in the page already asked for fresh data; keep it fresh while the page is open
+    if (canPush) navigator.serviceWorker.addEventListener('message', function(e){ if (e.data==='pull') pull(); });
     setInterval(function(){ if (document.visibilityState!=='hidden') pull(); }, 20000);
     setInterval(note, 30000);
     document.addEventListener('visibilitychange', function(){ if (document.visibilityState==='visible') pull(); });
     window.addEventListener('pageshow', function(e){ if (e.persisted) pull(); });
+    if (!k64) { pwScreen(); note(); return; }
+    note();
+    var cached=lget('wv_blob');
+    if (cached) { try{ open(unb64(cached).buffer).then(function(w){ if(!last) show(w); }, function(){}); }catch(e){} }
+    pushSetup();
   }
   if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

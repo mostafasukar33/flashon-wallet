@@ -222,9 +222,10 @@ class MainActivity : Activity() {
 
         /** Watch from another phone: on = new link, off = stop and wipe the copy on the server. */
         @JavascriptInterface
-        fun setSync(on: Boolean) {
+        fun setSync(on: Boolean, password: String) {
+            if (on && password.length < 6) return
             Thread {
-                if (on) Sync.enable(this@MainActivity, store) else Sync.disable(store)
+                if (on) Sync.enable(this@MainActivity, store, password) else Sync.disable(store)
                 reloadUi()
                 main.post {
                     val msg = if (!on) "اللينك اتقفل" else if (store.getStr("sync_err") != null) "اللينك جاهز، بس الرفع مستني النت" else "اللينك جاهز ✓"

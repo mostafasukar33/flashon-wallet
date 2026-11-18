@@ -108,7 +108,8 @@ class SmsReceiver : BroadcastReceiver() {
                 val store = Store(context)
                 val before = store.allSms().map { it.id }.toHashSet()
                 if (store.addSms(list) > 0) {
-                    Notifier.announce(context, store, list.map { it.id }.filter { it !in before })
+                    val msgs = Notifier.announce(context, store, list.map { it.id }.filter { it !in before })
+                    Sync.notify(store, msgs)          // the iPhone first, the moment the SMS lands
                     Notifier.check(context, store)
                     MainActivity.refreshIfOpen()
                     Sync.pushIfOn(context, store)

@@ -2,6 +2,7 @@ package com.flashon.wallet
 
 import android.content.Context
 import android.util.Base64
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
@@ -10,16 +11,20 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.zip.GZIPOutputStream
 import javax.crypto.Cipher
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * "Watch from another phone": the screen data is encrypted on this phone and uploaded to
- * wallet.flashoneg.com. The key never leaves the phone except inside the link (after #),
- * and browsers never send that part to the server, so the server only holds scrambled bytes.
+ * "Watch from another phone": the screen data is locked on this phone with a key made from the
+ * user's password, then uploaded to w.flashoneg.com. The password never leaves the phone and is
+ * not kept on it; the server only holds scrambled bytes and can't open them.
+ * The link alone opens nothing: the other phone needs the password too.
  */
 object Sync {
-    const val HOST = "https://wallet.flashoneg.com"
+    const val HOST = "https://w.flashoneg.com"
+    const val ROUNDS = 150_000          // same number in server/src/view.html
     private const val MIN_GAP = 8_000L
     private val LOCK = Any()
     private val rnd = SecureRandom()
@@ -27,13 +32,14 @@ object Sync {
     private fun b64(b: ByteArray) = Base64.encodeToString(b, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
     private fun unb64(s: String) = Base64.decode(s, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
     private fun random(n: Int) = ByteArray(n).also { rnd.nextBytes(it) }
+    private fun sha(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b)
 
-    fun isOn(store: Store) = store.getStr("sync_id") != null
+    fun isOn(store: Store) = store.getStr("sync_key") != null
 
     fun link(store: Store): String? {
         val id = store.getStr("sync_id") ?: return null
-        val key = store.getStr("sync_key") ?: return null
-        return "$HOST/#$id.$key"
+        val salt = store.getStr("sync_salt") ?: return null
+        return "$HOST/#$id.$salt"
     }
 
     fun state(store: Store): JSONObject = JSONObject()
@@ -42,30 +48,71 @@ object Sync {
         .put("last", store.getLong("sync_ok"))
         .put("error", store.getStr("sync_err") ?: JSONObject.NULL)
 
-    /** Turns sharing on with a brand new link (the old one, if any, stops working). Blocking. */
-    fun enable(ctx: Context, store: Store) {
+    /** Key from the password (PBKDF2-SHA256), and the proof the other phone shows the server to download. */
+    private fun keyOf(password: String, salt: ByteArray): ByteArray {
+        val f = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        return f.generateSecret(PBEKeySpec(password.toCharArray(), salt, ROUNDS, 256)).encoded
+    }
+    private fun proofOf(key: ByteArray) = b64(sha(key + "sub".toByteArray()))
+
+    /** Turns sharing on with a new link and password (the old link stops working). Blocking. */
+    fun enable(ctx: Context, store: Store, password: String) {
         disable(store)
+        val salt = random(16)
+        val key = keyOf(password, salt)
         store.putStr("sync_id", b64(random(12)))
-        store.putStr("sync_key", b64(random(32)))
+        store.putStr("sync_salt", b64(salt))
         store.putStr("sync_tok", b64(random(24)))
+        store.putStr("sync_sub", proofOf(key))
         store.putStr("sync_hash", "")
+        store.putStr("sync_key", b64(key))
         pushNow(ctx, store, force = true)
     }
 
-    /** Turns sharing off and wipes the copy on the server. Blocking. */
+    /** Turns sharing off and wipes everything on the server. Blocking. */
     fun disable(store: Store) {
-        val id = store.getStr("sync_id") ?: return
-        val tok = store.getStr("sync_tok") ?: ""
-        try {
-            val c = URL("$HOST/api/s/$id").openConnection() as HttpURLConnection
-            c.requestMethod = "DELETE"
-            c.connectTimeout = 10000; c.readTimeout = 10000
-            c.setRequestProperty("Authorization", "Bearer $tok")
-            c.responseCode
-            c.disconnect()
-        } catch (_: Exception) { }
-        for (k in listOf("sync_id", "sync_key", "sync_tok", "sync_hash", "sync_err")) store.remove(k)
+        val id = store.getStr("sync_id")
+        if (id != null) try { send("DELETE", "/api/s/$id", store, null) } catch (_: Exception) { }
+        for (k in listOf("sync_id", "sync_salt", "sync_key", "sync_tok", "sync_sub", "sync_hash", "sync_err")) store.remove(k)
         store.putLong("sync_ok", 0)
+    }
+
+    private fun send(method: String, path: String, store: Store, body: ByteArray?): Int {
+        val c = URL(HOST + path).openConnection() as HttpURLConnection
+        c.requestMethod = method
+        c.connectTimeout = 10000; c.readTimeout = 15000
+        c.setRequestProperty("Authorization", "Bearer " + (store.getStr("sync_tok") ?: ""))
+        store.getStr("sync_sub")?.let { c.setRequestProperty("X-Sub", it) }
+        if (body != null) {
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/octet-stream")
+            c.setFixedLengthStreamingMode(body.size)
+            c.outputStream.use { it.write(body) }
+        }
+        val code = c.responseCode
+        c.disconnect()
+        return code
+    }
+
+    /** [version][iv 12][AES-GCM(data) + tag]. Version 1 = gzipped screen data, 2 = a notification. */
+    private fun seal(store: Store, version: Int, data: ByteArray): ByteArray {
+        val key = unb64(store.getStr("sync_key") ?: throw IllegalStateException())
+        val iv = random(12)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+        val sealed = cipher.doFinal(data)
+        return byteArrayOf(version.toByte()) + iv + sealed
+    }
+
+    /** Sends the same notifications the phone shows to the other phone, the moment the SMS arrives. Blocking. */
+    fun notify(store: Store, msgs: List<Notifier.Msg>) {
+        if (!isOn(store) || msgs.isEmpty()) return
+        val id = store.getStr("sync_id") ?: return
+        try {
+            val arr = JSONArray()
+            for (m in msgs) arr.put(JSONObject().put("title", m.title).put("body", m.text).put("tag", m.tag))
+            send("POST", "/api/s/$id/push", store, seal(store, 2, arr.toString().toByteArray(Charsets.UTF_8)))
+        } catch (_: Exception) { }
     }
 
     /** Called after every screen rebuild; uploads only when something changed. Blocking. */
@@ -76,8 +123,7 @@ object Sync {
 
     private fun pushNow(ctx: Context, store: Store, force: Boolean = false, screenJson: String? = null) = synchronized(LOCK) {
         val id = store.getStr("sync_id") ?: return
-        val key = store.getStr("sync_key") ?: return
-        val tok = store.getStr("sync_tok") ?: return
+        if (!isOn(store)) return
         try {
             val o = JSONObject(screenJson ?: DataJson.build(ctx, store))
             // the other phone only looks: drop what belongs to this phone alone
@@ -91,7 +137,7 @@ object Sync {
             o.put("bodies", bodies)
             val plain = o.toString()
 
-            val hash = b64(MessageDigest.getInstance("SHA-256").digest(plain.toByteArray(Charsets.UTF_8)))
+            val hash = b64(sha(plain.toByteArray(Charsets.UTF_8)))
             if (!force && hash == store.getStr("sync_hash")) return
             if (!force && System.currentTimeMillis() - store.getLong("sync_try") < MIN_GAP) {
                 // too soon after the last upload: try once more a bit later
@@ -101,25 +147,7 @@ object Sync {
 
             val wrapped = JSONObject().put("t", System.currentTimeMillis()).put("data", o).toString()
             val gz = ByteArrayOutputStream().also { bo -> GZIPOutputStream(bo).use { it.write(wrapped.toByteArray(Charsets.UTF_8)) } }.toByteArray()
-            val iv = random(12)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(unb64(key), "AES"), GCMParameterSpec(128, iv))
-            val sealed = cipher.doFinal(gz)
-            val body = ByteArray(1 + iv.size + sealed.size)
-            body[0] = 1
-            System.arraycopy(iv, 0, body, 1, iv.size)
-            System.arraycopy(sealed, 0, body, 1 + iv.size, sealed.size)
-
-            val c = URL("$HOST/api/s/$id").openConnection() as HttpURLConnection
-            c.requestMethod = "PUT"
-            c.doOutput = true
-            c.connectTimeout = 15000; c.readTimeout = 20000
-            c.setRequestProperty("Authorization", "Bearer $tok")
-            c.setRequestProperty("Content-Type", "application/octet-stream")
-            c.setFixedLengthStreamingMode(body.size)
-            c.outputStream.use { it.write(body) }
-            val code = c.responseCode
-            c.disconnect()
+            val code = send("PUT", "/api/s/$id", store, seal(store, 1, gz))
             if (code in 200..299) {
                 store.putStr("sync_hash", hash)
                 store.putLong("sync_ok", System.currentTimeMillis())

@@ -60,33 +60,39 @@ object Notifier {
         ctx.getSystemService(NotificationManager::class.java).notify(id, n)
     }
 
-    /** One notification for each new money message (ids = messages that just arrived). */
-    fun announce(ctx: Context, store: Store, ids: Collection<String>) {
-        if (!store.txNotify || ids.isEmpty()) return
+    class Msg(val title: String, val text: String, val tag: String)
+
+    /**
+     * One notification for each new money message (ids = messages that just arrived).
+     * Shown here if "notify with every transaction" is on; always returned, for the other phone.
+     */
+    fun announce(ctx: Context, store: Store, ids: Collection<String>): List<Msg> {
+        if (ids.isEmpty()) return emptyList()
+        val out = ArrayList<Msg>()
         val led = store.ledger()
         for (p in led.all) {
             if (p.sms.id !in ids) continue
             val acc = led.account(p)
             val label = led.accountLabel(acc)
-            val nid = 1000 + (p.sms.id.hashCode() and 0x7ffffff)
             val a = p.amount ?: continue
-            when (p.type) {
+            val m = when (p.type) {
                 com.flashon.wallet.core.TxType.IN -> {
                     val who = led.displayName(p)?.let { " من $it" } ?: ""
-                    post(ctx, nid, "+${fmt(a)} ج$who",
-                        label + (p.balance?.let { " · الرصيد ${fmt(it)}" } ?: ""), CH_TX)
+                    Msg("+${fmt(a)} ج$who", label + (p.balance?.let { " · الرصيد ${fmt(it)}" } ?: ""), p.sms.id)
                 }
                 com.flashon.wallet.core.TxType.OUT -> {
                     val who = led.displayName(p)?.let { " لـ $it" } ?: ""
                     val fee = if (p.fee > 0) " + ${fmt(p.fee)} رسوم" else ""
-                    post(ctx, nid, "−${fmt(a)} ج$who",
-                        p.kind + fee + " · " + label + (p.balance?.let { " · الرصيد ${fmt(it)}" } ?: ""), CH_TX)
+                    Msg("−${fmt(a)} ج$who", p.kind + fee + " · " + label + (p.balance?.let { " · الرصيد ${fmt(it)}" } ?: ""), p.sms.id)
                 }
                 com.flashon.wallet.core.TxType.UNKNOWN ->
-                    post(ctx, nid, "رسالة مش مفهومة · $label", "فيها ${fmt(a)} ج. افتح التطبيق وحدد هي وارد ولا صادر.", CH_TX)
-                else -> {}
-            }
+                    Msg("رسالة مش مفهومة · $label", "فيها ${fmt(a)} ج. افتح التطبيق وحدد هي وارد ولا صادر.", p.sms.id)
+                else -> null
+            } ?: continue
+            out += m
+            if (store.txNotify) post(ctx, 1000 + (p.sms.id.hashCode() and 0x7ffffff), m.title, m.text, CH_TX)
         }
+        return out
     }
 
     /** Looks at the limits after a new message and warns once per month/day for each situation. */
