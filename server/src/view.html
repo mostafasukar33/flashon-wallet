@@ -100,7 +100,7 @@ body{padding-bottom:64px}
     if (a<86400) return ago.format(Math.round(s/3600),'hour');
     return ago.format(Math.round(s/86400),'day');
   }
-  var pushMsg='';
+  var pushMsg='', pushOn=false;
   function note(){
     if (!document.body) return;
     var n=document.getElementById('vnote');
@@ -156,7 +156,7 @@ body{padding-bottom:64px}
       });
     }).then(function(s){
       return fetch('/api/s/'+id+'/sub', {method:'POST', headers:{'X-Sub':proof,'Content-Type':'application/json'}, body:JSON.stringify(s.toJSON())});
-    }).then(function(r){ if (loud) toastMsg(r.ok?'الإشعارات اشتغلت ✓':'مقدرتش أشغلها، جرب تاني'); })
+    }).then(function(r){ pushOn=r.ok; if (loud) toastMsg(r.ok?'الإشعارات اشتغلت ✓':'مقدرتش أشغلها، جرب تاني'); })
       .catch(function(){ if (loud) toastMsg('مقدرتش أشغل الإشعارات'); });
   }
   document.addEventListener('click', function(e){
@@ -185,7 +185,8 @@ body{padding-bottom:64px}
     }
     if (!(window.crypto&&crypto.subtle&&window.DecompressionStream)) { state='old'; note(); return; }
     if (canPush) navigator.serviceWorker.addEventListener('message', function(e){ if (e.data==='pull') pull(); });
-    setInterval(function(){ if (document.visibilityState!=='hidden') pull(); }, 20000);
+    // with notifications on, a new transaction wakes the page itself (sw.txt says 'pull'); otherwise ask once a minute
+    setInterval(function(){ if (!pushOn && document.visibilityState!=='hidden') pull(); }, 60000);
     setInterval(note, 30000);
     document.addEventListener('visibilitychange', function(){ if (document.visibilityState==='visible') pull(); });
     window.addEventListener('pageshow', function(e){ if (e.persisted) pull(); });

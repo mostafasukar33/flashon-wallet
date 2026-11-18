@@ -443,6 +443,7 @@ function settingsScreen(){
         '<span>2. من زرار المشاركة اختار "Add to Home Screen".</span>'+
         '<span>3. افتحه من الأيقونة الجديدة، واكتب الباسورد مرة واحدة.</span>'+
         '<span>4. دوس "شغّل الإشعارات" ووافق.</span></div>'+
+      (D.batteryOk===false?'<div class="alert mid"><b>عشان الإشعار يوصل الآيفون والتطبيق مقفول</b><span style="line-height:1.7">اسمح للتطبيق يشتغل في الخلفية، وإلا الموبايل ممكن يمنعه من النت.</span><button class="btn ghost" data-act="battery">اسمحله</button></div>':'')+
       '<div class="grid2"><button class="btn ghost" data-act="syncnew">لينك وباسورد جداد</button><button class="btn ghost" data-act="syncoff">اقفله</button></div>'+
       '<span class="xs mute" style="line-height:1.6">"لينك وباسورد جداد" بيقفل القديم على أي موبايل كان فاتحه. الباسورد مش محفوظ في أي حتة، فلو نسيته اعمل جديد.</span>';
   }

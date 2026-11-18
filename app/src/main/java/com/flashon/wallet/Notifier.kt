@@ -63,6 +63,35 @@ object Notifier {
     class Msg(val title: String, val text: String, val tag: String)
 
     /**
+     * The iPhone message for a new SMS, read from that SMS alone (no full ledger), so it can go out
+     * the moment the SMS lands. Messages that need the full history to understand return nothing
+     * here and go out right after, from [announce].
+     */
+    fun quick(store: Store, sms: List<com.flashon.wallet.core.RawSms>): List<Msg> {
+        val l = store.learned()
+        val out = ArrayList<Msg>()
+        for (raw in sms) {
+            val p = com.flashon.wallet.core.Parser.parse(raw) ?: continue
+            l.overrides[raw.id]?.let { p.type = it } ?: run { if (p.type == com.flashon.wallet.core.TxType.UNKNOWN) l.rules[p.signature]?.let { p.type = it } }
+            val a = p.amount ?: continue
+            val label = l.accountNames[p.wallet.key + raw.sim]?.takeIf { it.isNotBlank() }
+                ?: l.accountNames[p.wallet.key]?.takeIf { it.isNotBlank() } ?: p.wallet.label
+            val name = p.phone?.let { l.names[it] } ?: p.smsName ?: p.phone
+            val bal = p.balance?.let { " · الرصيد ${fmt(it)}" } ?: ""
+            out += when (p.type) {
+                com.flashon.wallet.core.TxType.IN -> Msg("+${fmt(a)} ج" + (name?.let { " من $it" } ?: ""), label + bal, raw.id)
+                com.flashon.wallet.core.TxType.OUT -> {
+                    val kind = p.kind.ifBlank { "صادر" }
+                    val fee = if (p.fee > 0) " + ${fmt(p.fee)} رسوم" else ""
+                    Msg("−${fmt(a)} ج" + (name?.let { " لـ $it" } ?: ""), kind + fee + " · " + label + bal, raw.id)
+                }
+                else -> continue
+            }
+        }
+        return out
+    }
+
+    /**
      * One notification for each new money message (ids = messages that just arrived).
      * Shown here if "notify with every transaction" is on; always returned, for the other phone.
      */

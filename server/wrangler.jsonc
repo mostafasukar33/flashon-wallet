@@ -13,5 +13,6 @@
   "durable_objects": { "bindings": [ { "name": "BOX", "class_name": "Box" } ] },
   "migrations": [ { "tag": "v1", "new_sqlite_classes": ["Box"] } ],
   "vars": { "VAPID_PUBLIC": "BMIaC2-NpQ0xWe3vzaQNZtGVH0TbwoTTmzg47Cw_mC6vCinEnEK-27yjr-9o6Roc7afB5ZBysycaO_DL_tlUZqc" },
-  "routes": [ { "pattern": "w.flashoneg.com", "custom_domain": true } ]
+  // الـ route بتاع w.flashoneg.com/* لازم يفضل: من غيره الـ route بنجمة بتاع برنامج الحسابات بيلقط الطلبات (زي flash.flashoneg.com/*)
+  "routes": [ { "pattern": "w.flashoneg.com", "custom_domain": true }, { "pattern": "w.flashoneg.com/*", "zone_name": "flashoneg.com" } ]
 }

@@ -73,7 +73,7 @@ object Sync {
     fun disable(store: Store) {
         val id = store.getStr("sync_id")
         if (id != null) try { send("DELETE", "/api/s/$id", store, null) } catch (_: Exception) { }
-        for (k in listOf("sync_id", "sync_salt", "sync_key", "sync_tok", "sync_sub", "sync_hash", "sync_err")) store.remove(k)
+        for (k in listOf("sync_id", "sync_salt", "sync_key", "sync_tok", "sync_sub", "sync_hash", "sync_err", "sync_pending")) store.remove(k)
         store.putLong("sync_ok", 0)
     }
 
@@ -104,15 +104,51 @@ object Sync {
         return byteArrayOf(version.toByte()) + iv + sealed
     }
 
-    /** Sends the same notifications the phone shows to the other phone, the moment the SMS arrives. Blocking. */
-    fun notify(store: Store, msgs: List<Notifier.Msg>) {
+    private const val PENDING_MAX_AGE = 6 * 60 * 60 * 1000L
+    private val PENDING_LOCK = Any()
+
+    /**
+     * Sends the same notifications the phone shows to the other phone, the moment the SMS arrives.
+     * With no internet they wait on the phone and go out by themselves when it's back. Blocking.
+     */
+    fun notify(ctx: Context, store: Store, msgs: List<Notifier.Msg>) {
         if (!isOn(store) || msgs.isEmpty()) return
-        val id = store.getStr("sync_id") ?: return
-        try {
-            val arr = JSONArray()
-            for (m in msgs) arr.put(JSONObject().put("title", m.title).put("body", m.text).put("tag", m.tag))
-            send("POST", "/api/s/$id/push", store, seal(store, 2, arr.toString().toByteArray(Charsets.UTF_8)))
-        } catch (_: Exception) { }
+        val now = System.currentTimeMillis()
+        val arr = JSONArray()
+        for (m in msgs) arr.put(JSONObject().put("title", m.title).put("body", m.text).put("tag", m.tag))
+        if (!sendPush(store, arr)) {
+            synchronized(PENDING_LOCK) {
+                val q = pending(store)
+                for (i in 0 until arr.length()) q.put(arr.getJSONObject(i).put("at", now))
+                store.putStr("sync_pending", q.toString())
+            }
+            PushRetry.schedule(ctx)
+        }
+    }
+
+    private fun pending(store: Store): JSONArray = try { JSONArray(store.getStr("sync_pending") ?: "[]") } catch (_: Exception) { JSONArray() }
+
+    /** Sends what waited for the internet. Returns false if it should be tried again later. Blocking. */
+    fun flushPending(store: Store): Boolean = synchronized(PENDING_LOCK) {
+        if (!isOn(store)) { store.remove("sync_pending"); return true }
+        val q = pending(store)
+        val now = System.currentTimeMillis()
+        val keep = JSONArray()
+        for (i in 0 until q.length()) { val o = q.getJSONObject(i); if (now - o.optLong("at") < PENDING_MAX_AGE) keep.put(o) }
+        if (keep.length() == 0) { store.remove("sync_pending"); return true }
+        // the last 10 is enough; the full list is on the screen anyway
+        val send = JSONArray(); for (i in maxOf(0, keep.length() - 10) until keep.length()) send.put(keep.getJSONObject(i))
+        if (!sendPush(store, send)) { store.putStr("sync_pending", keep.toString()); return false }
+        store.remove("sync_pending")
+        return true
+    }
+
+    private fun sendPush(store: Store, arr: JSONArray): Boolean {
+        val id = store.getStr("sync_id") ?: return true
+        return try {
+            val code = send("POST", "/api/s/$id/push", store, seal(store, 2, arr.toString().toByteArray(Charsets.UTF_8)))
+            code in 200..299 || code == 400 || code == 403 || code == 404   // those won't get better by retrying
+        } catch (_: Exception) { false }
     }
 
     /** Called after every screen rebuild; uploads only when something changed. Blocking. */

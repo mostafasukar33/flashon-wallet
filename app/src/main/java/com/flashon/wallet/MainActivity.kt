@@ -86,6 +86,7 @@ class MainActivity : Activity() {
         Thread {
             SmsSource.scanInbox(this)
             reloadUi()
+            if (store.getStr("sync_pending") != null) try { Sync.flushPending(store) } catch (_: Exception) { }
             if (Updater.shouldAutoCheck(this)) { Updater.check(this); reloadUi() }
         }.start()
     }

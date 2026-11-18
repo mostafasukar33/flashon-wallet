@@ -108,8 +108,12 @@ class SmsReceiver : BroadcastReceiver() {
                 val store = Store(context)
                 val before = store.allSms().map { it.id }.toHashSet()
                 if (store.addSms(list) > 0) {
-                    val msgs = Notifier.announce(context, store, list.map { it.id }.filter { it !in before })
-                    Sync.notify(store, msgs)          // the iPhone first, the moment the SMS lands
+                    val fresh = list.filter { it.id !in before }
+                    // the iPhone first: read the new SMS alone and send, before the full ledger is built
+                    val sent = if (Sync.isOn(store)) Notifier.quick(store, fresh).also { Sync.notify(context, store, it) } else emptyList()
+                    val msgs = Notifier.announce(context, store, fresh.map { it.id })
+                    val tags = sent.map { it.tag }.toHashSet()
+                    Sync.notify(context, store, msgs.filter { it.tag !in tags })
                     Notifier.check(context, store)
                     MainActivity.refreshIfOpen()
                     Sync.pushIfOn(context, store)
