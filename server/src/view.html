@@ -7,7 +7,7 @@
 #vnote .p button{border:0;border-radius:10px;min-height:40px;padding:0 14px;font-weight:700;font-family:inherit;font-size:14px}
 #vnote .p .go{background:#1E5AA8;color:#fff;white-space:nowrap}
 #vnote .p .x{background:transparent;color:#555A60;padding:0 6px}
-body{padding-bottom:64px}
+body{padding-bottom:24px}
 </style>
 <script>
 /* Read-only window on the Android app. The link carries <id>.<salt> after #; the password turns it into the key
@@ -112,7 +112,8 @@ body{padding-bottom:64px}
       : state==='old' ? 'المتصفح ده قديم، حدّث الآيفون أو افتحه في سفاري'
       : !k64 ? ''
       : !stamp ? (state==='net'?'مفيش نت':'بيجيب الحساب…')
-      : 'آخر تحديث من الموبايل '+since(stamp)+(state==='net'?' · مفيش نت دلوقتي':'');
+      : state==='net' ? 'مفيش نت دلوقتي، ده آخر حساب وصل '+since(stamp)
+      : '';   // all good: nothing on top of the page
     n.className=(state==='gone'||state==='old'||(state==='net'&&!stamp))?'bad':'';
     n.innerHTML=(pushMsg?'<div class="p">'+pushMsg+'</div>':'')+(msg?'<span class="n"></span>':'');
     if (msg) n.querySelector('.n').textContent=msg;

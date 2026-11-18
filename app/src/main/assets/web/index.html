@@ -285,7 +285,7 @@ function home(){
       '<div><span>فاضل تحويل الشهر ده</span><b class="num" style="text-align:right">'+fmt(leftM)+'</b></div></div>'+
       (locked>0.5?'<div class="lock">'+fmt(locked)+' ج هيتقفلوا للشهر الجاي</div>':'')+'</div>';
   }
-  if (!D.batteryOk) h+='<div class="minibat"><span>اسمح للتطبيق يشتغل في الخلفية عشان ميفوتش رسايل</span><button data-act="battery">اسمحله</button></div>';
+  if (!VIEW && !D.batteryOk) h+='<div class="minibat"><span>اسمح للتطبيق يشتغل في الخلفية عشان ميفوتش رسايل</span><button data-act="battery">اسمحله</button></div>';
 
   // ---- each wallet ----
   h+='<div class="grid2" id="wallets">'+D.now.map(function(n){

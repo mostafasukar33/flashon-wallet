@@ -130,7 +130,8 @@ const sample = (balance) => ({ t: Date.now() - 120000, data: {
     await pg.waitForFunction(() => document.body.innerText.includes('8,713.70'), null, {timeout: 15000}).catch(() => {});
     const txt = await pg.innerText('body');
     eq('الرصيد ظاهر على الآيفون', txt.includes('8,713.70'), true);
-    eq('مكتوب آخر تحديث', /آخر تحديث من الموبايل/.test(txt), true);
+    eq('مفيش شريط تحت لما كله تمام', /آخر تحديث من الموبايل/.test(txt), false);
+    eq('مفيش تنبيه بطارية الأندرويد على الآيفون', await pg.locator('.minibat').count(), 0);
     eq('مفيش زرار إعدادات', await pg.isVisible('[data-act=settings]'), false);
     eq('الباسورد نفسه مش محفوظ', await pg.evaluate(() => JSON.stringify(localStorage).includes('secret123')), false);
     // زي أيقونة الآيفون: بتفتح /v/… في مكان تخزين لوحده، فبيطلب الباسورد مرة واحدة ويفتح
