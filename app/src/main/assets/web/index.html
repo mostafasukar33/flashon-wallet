@@ -152,6 +152,7 @@ if (!B) {
     setName:function(p,n){mock.txs.forEach(function(t){if(t.phone===p)t.name=n||t.smsName||p});setTimeout(App.reload,50)},
     saveSettings:function(j){mock.settings=JSON.parse(j);setTimeout(App.reload,50)},
     openBattery:function(){mock.batteryOk=true;setTimeout(App.reload,50)},
+    openAutostart:function(){toast('بيفتح التشغيل التلقائي…')},
     rescan:function(){setTimeout(App.reload,300)},
     checkUpdate:function(){setTimeout(function(){App.onUpdate(JSON.stringify(mock.update))},400)},
     downloadUpdate:function(){toast('بينزل التحديث…')},
@@ -443,7 +444,7 @@ function settingsScreen(){
         '<span>2. من زرار المشاركة اختار "Add to Home Screen".</span>'+
         '<span>3. افتحه من الأيقونة الجديدة، واكتب الباسورد مرة واحدة.</span>'+
         '<span>4. دوس "شغّل الإشعارات" ووافق.</span></div>'+
-      (D.batteryOk===false?'<div class="alert mid"><b>عشان الإشعار يوصل الآيفون والتطبيق مقفول</b><span style="line-height:1.7">اسمح للتطبيق يشتغل في الخلفية، وإلا الموبايل ممكن يمنعه من النت.</span><button class="btn ghost" data-act="battery">اسمحله</button></div>':'')+
+      (D.batteryOk===false||D.watch===false?'<div class="alert mid"><b>⚠️ الموبايل ده بيوقّف التطبيق وهو مقفول، فالإشعارات بتتأخر</b><span style="line-height:1.7">اسمح له مرة واحدة بالزرارين دول، والتحويل يوصل الآيفون في نفس اللحظة حتى والتطبيق مقفول.</span>'+bgBtns()+'</div>':'')+
       '<div class="grid2"><button class="btn ghost" data-act="syncnew">لينك وباسورد جداد</button><button class="btn ghost" data-act="syncoff">اقفله</button></div>'+
       '<span class="xs mute" style="line-height:1.6">"لينك وباسورد جداد" بيقفل القديم على أي موبايل كان فاتحه. الباسورد مش محفوظ في أي حتة، فلو نسيته اعمل جديد.</span>';
   }
@@ -459,11 +460,17 @@ function settingsScreen(){
     '<div class="grid2"><select id="ex_m" class="pill" style="min-height:48px;border-radius:10px">'+mo+'</select><select id="ex_w" class="pill" style="min-height:48px;border-radius:10px">'+wo+'</select></div>'+
     '<button class="btn ghost" data-act="export">اعمل الملف وابعته</button><span class="xs mute" style="line-height:1.6">ملف بيتفتح على Excel، تقدر تبعته واتساب أو إيميل أو تحفظه على Drive.</span></div>';
 
-  h+='<div class="card col" style="gap:10px"><h2>التشغيل في الخلفية</h2><span class="small mute" style="line-height:1.7">'+(D.batteryOk?'التطبيق مسموحله يشتغل في الخلفية ✓':'التطبيق ممكن يتقفل لوحده عشان البطارية، فممكن تتأخر الإشعارات.')+'</span>'+
-     (D.batteryOk?'':'<button class="btn ghost" data-act="battery">اسمحله يشتغل في الخلفية</button>')+'</div>';
+  h+='<div class="card col" style="gap:10px"><h2>التشغيل في الخلفية</h2><span class="small mute" style="line-height:1.7">'+(D.batteryOk&&D.watch!==false?'التطبيق شغال ومستني التحويلات حتى وهو مقفول ✓ (علشان كده فيه سطر «💰 محافظي شغال» ثابت فوق).':'التطبيق ممكن يتقفل لوحده عشان البطارية، فممكن تتأخر الإشعارات.')+'</span>'+bgBtns()+'</div>';
   h+='<div class="card col" style="gap:10px"><h2>الرسايل</h2><span class="small mute" style="line-height:1.7">لو حاسس إن فيه عملية ناقصة، خلي التطبيق يقرا كل الرسايل من الأول.</span><button class="btn ghost" data-act="rescan">اقرا الرسايل من جديد</button></div>';
   h+='<div class="card col" style="gap:10px"><h2>التطبيق</h2><span class="small mute">النسخة '+esc(D.version)+'</span><button class="btn ghost" data-act="chkupd">شوف فيه تحديث</button></div>';
   return h+'</div>';
+}
+
+function bgBtns(){
+  return '<button class="btn ghost" data-act="autostart">1. اسمح له يشتغل لوحده (Auto-start)</button>'+
+    '<span class="xs mute" style="line-height:1.6">هتفتح صفحة «التشغيل التلقائي»: دوّر على «محافظي» وشغّل المفتاح اللي جنبه.</span>'+
+    (D.batteryOk?'<span class="xs mute">2. من غير توفير بطارية ✓</span>':'<button class="btn ghost" data-act="battery">2. من غير توفير بطارية</button><span class="xs mute" style="line-height:1.6">دوس «سماح» (Allow).</span>')+
+    '<span class="xs mute" style="line-height:1.6">3. وفي قايمة التطبيقات المفتوحة: اسحب كارت «محافظي» لتحت أو دوس عليه مطوّل واختار القفل 🔒، علشان «امسح الكل» ميقفلوش.</span>';
 }
 
 function pwField(){
@@ -524,6 +531,7 @@ document.addEventListener('click', function(e){
   switch(a){
     case 'perm': B.requestSms(); break;
     case 'battery': B.openBattery(); break;
+    case 'autostart': if (B.openAutostart) B.openAutostart(); break;
     case 'settings': go('settings'); break;
     case 'back': back(); break;
     case 'totop': window.scrollTo({top:0,behavior:'smooth'}); break;

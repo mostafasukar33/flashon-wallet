@@ -134,6 +134,9 @@ body{padding-bottom:24px}
     }).catch(function(){ state='net'; }).then(function(){ busy=false; note(); });
   }
 
+  var soonT=[];
+  function soon(){ soonT.forEach(clearTimeout); pull(); soonT=[3000,8000,20000,45000].map(function(ms){ return setTimeout(pull, ms); }); }
+
   /* ---------- notifications (iPhone: only from the home-screen icon, iOS 16.4+) ---------- */
   var standalone = window.navigator.standalone===true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
   var isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
@@ -188,9 +191,11 @@ body{padding-bottom:24px}
       return;
     }
     if (!(window.crypto&&crypto.subtle&&window.DecompressionStream)) { state='old'; note(); return; }
-    if (canPush) navigator.serviceWorker.addEventListener('message', function(e){ if (e.data==='pull') pull(); });
-    // with notifications on, a new transaction wakes the page itself (sw.txt says 'pull'); otherwise ask once a minute
-    setInterval(function(){ if (!pushOn && document.visibilityState!=='hidden') pull(); }, 60000);
+    // a notification came: the new account is uploaded a moment after it, so ask now and a few times after
+    if (canPush) navigator.serviceWorker.addEventListener('message', function(e){ if (e.data==='pull') soon(); });
+    // while the page is on the screen it asks every 15 seconds, notifications or not (an unchanged account is an empty answer)
+    setInterval(function(){ if (document.visibilityState!=='hidden') pull(); }, 15000);
+    window.addEventListener('focus', function(){ pull(); });
     setInterval(note, 30000);
     document.addEventListener('visibilitychange', function(){ if (document.visibilityState==='visible') pull(); });
     window.addEventListener('pageshow', function(e){ if (e.persisted) pull(); });

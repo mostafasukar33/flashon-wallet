@@ -28,6 +28,14 @@ object SmsSource {
         val doFull = full || store.getLong("fullScanV") < FULL_SCAN_VERSION
         val since = if (doFull) 0L else (store.getLong("lastScan") - 3L * 24 * 3600 * 1000).coerceAtLeast(0L)
         val startedAt = System.currentTimeMillis()
+        val found = readInbox(ctx, since)
+        val added = store.addSms(found, trustSim = true)
+        store.putLong("lastScan", startedAt)
+        if (doFull) store.putLong("fullScanV", FULL_SCAN_VERSION.toLong())
+        return added
+    }
+
+    private fun readInbox(ctx: Context, since: Long): List<RawSms> {
         val found = ArrayList<RawSms>()
         val where = "(" + Telephony.Sms.DATE + " > ?) AND (" +
             listOf("body LIKE '%كاش%'", "body LIKE '%cash%'", "body LIKE '%محفظ%'", "body LIKE '%wallet%'",
@@ -53,10 +61,45 @@ object SmsSource {
                 }
             }
         } catch (_: Exception) { }
-        val added = store.addSms(found, trustSim = true)
+        return found
+    }
+
+    private val DELIVER_LOCK = Any()
+    private const val LATE_MAX = 6 * 60 * 60 * 1000L
+
+    /**
+     * New wallet messages, however they were caught (the SMS broadcast, the inbox watcher in
+     * [WatchService], or opening the app): the other phone first, then this phone's notification,
+     * then the screens. A message that was already handled adds nothing and sends nothing. Blocking.
+     */
+    fun deliver(ctx: Context, list: List<RawSms>) = synchronized(DELIVER_LOCK) {
+        if (list.isEmpty()) return
+        val store = Store(ctx)
+        val before = store.allSms().map { it.id }.toHashSet()
+        if (store.addSms(list) == 0) return
+        val now = System.currentTimeMillis()
+        // a message older than a few hours (first read of the inbox, "read again") is not news
+        val fresh = list.filter { it.id !in before && now - it.time < LATE_MAX }.distinctBy { it.id }
+        if (fresh.isNotEmpty()) {
+            // the other phone first: read the new SMS alone and send, before the full ledger is built
+            val sent = if (Sync.isOn(store)) Notifier.quick(store, fresh).also { Sync.notify(ctx, store, it) } else emptyList()
+            val msgs = Notifier.announce(ctx, store, fresh.map { it.id })
+            val tags = sent.map { it.tag }.toHashSet()
+            Sync.notify(ctx, store, msgs.filter { it.tag !in tags })
+            Notifier.check(ctx, store)
+        }
+        MainActivity.refreshIfOpen()
+        Sync.pushIfOn(ctx, store)
+    }
+
+    /** The last days of the inbox, through [deliver]: catches what the SMS broadcast missed. Blocking. */
+    fun catchUp(ctx: Context) {
+        if (!hasPermission(ctx)) return
+        val store = Store(ctx)
+        if (store.getLong("fullScanV") < FULL_SCAN_VERSION) { scanInbox(ctx); return }
+        val startedAt = System.currentTimeMillis()
+        deliver(ctx, readInbox(ctx, (store.getLong("lastScan") - 3L * 24 * 3600 * 1000).coerceAtLeast(0L)))
         store.putLong("lastScan", startedAt)
-        if (doFull) store.putLong("fullScanV", FULL_SCAN_VERSION.toLong())
-        return added
     }
 
     /**
@@ -74,8 +117,19 @@ object SmsSource {
 /** Catches a new SMS the moment it arrives, even when the app is closed. */
 class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
-        val parts = try { Telephony.Sms.Intents.getMessagesFromIntent(intent) } catch (_: Exception) { null } ?: return
+        val list = parse(context, intent)
+        if (list.isEmpty()) return
+        val pending = goAsync()
+        Thread {
+            try { SmsSource.deliver(context, list) } catch (_: Exception) { } finally { pending.finish() }
+        }.start()
+        WatchService.start(context)   // the receiver ran but the watcher was stopped: start it again
+    }
+
+    companion object {
+    fun parse(context: Context, intent: Intent): List<RawSms> {
+        if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return emptyList()
+        val parts = try { Telephony.Sms.Intents.getMessagesFromIntent(intent) } catch (_: Exception) { null } ?: return emptyList()
         val ex = intent.extras
         fun intExtra(vararg keys: String): Int {
             for (k in keys) if (ex != null && ex.containsKey(k)) {
@@ -96,32 +150,11 @@ class SmsReceiver : BroadcastReceiver() {
             val e = bySender.getOrPut(s) { Pair(StringBuilder(), m.timestampMillis) }
             e.first.append(m.messageBody ?: "")
         }
-        val list = bySender.mapNotNull { (s, v) ->
+        return bySender.mapNotNull { (s, v) ->
             val body = v.first.toString()
             if (!SmsSource.isWallet(s, body)) null
             else RawSms(Store.idOf(s, body), s, body, System.currentTimeMillis(), sim)
         }
-        if (list.isEmpty()) return
-        val pending = goAsync()
-        Thread {
-            try {
-                val store = Store(context)
-                val before = store.allSms().map { it.id }.toHashSet()
-                if (store.addSms(list) > 0) {
-                    val fresh = list.filter { it.id !in before }
-                    // the iPhone first: read the new SMS alone and send, before the full ledger is built
-                    val sent = if (Sync.isOn(store)) Notifier.quick(store, fresh).also { Sync.notify(context, store, it) } else emptyList()
-                    val msgs = Notifier.announce(context, store, fresh.map { it.id })
-                    val tags = sent.map { it.tag }.toHashSet()
-                    Sync.notify(context, store, msgs.filter { it.tag !in tags })
-                    Notifier.check(context, store)
-                    MainActivity.refreshIfOpen()
-                    Sync.pushIfOn(context, store)
-                }
-            } catch (_: Exception) {
-            } finally {
-                pending.finish()
-            }
-        }.start()
+    }
     }
 }

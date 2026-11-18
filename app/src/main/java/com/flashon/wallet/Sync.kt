@@ -163,7 +163,7 @@ object Sync {
         try {
             val o = JSONObject(screenJson ?: DataJson.build(ctx, store))
             // the other phone only looks: drop what belongs to this phone alone
-            o.remove("sync"); o.remove("update"); o.remove("batteryOk")
+            o.remove("sync"); o.remove("update"); o.remove("batteryOk"); o.remove("watch")
             // full message text, so opening a transaction there shows the SMS too
             val ids = HashSet<String>()
             val txs = o.optJSONArray("txs")

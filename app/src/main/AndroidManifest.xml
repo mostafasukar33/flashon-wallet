@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:allowBackup="false"
@@ -46,6 +48,21 @@
             android:authorities="com.flashon.wallet.export"
             android:exported="false"
             android:grantUriPermissions="true" />
+
+        <!-- stays awake so a wallet SMS reaches the other phone the moment it lands (WatchService.kt) -->
+        <service
+            android:name=".WatchService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Forwards the user's own mobile-wallet SMS to their other phone the moment it arrives" />
+        </service>
+
+        <service
+            android:name=".WatchJob"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
 
         <service
             android:name=".PushRetry"

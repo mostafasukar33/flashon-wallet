@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.DownloadManager
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -83,8 +84,9 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         // pick up anything missed while the app was closed, then redraw
+        WatchService.start(this)
         Thread {
-            SmsSource.scanInbox(this)
+            try { SmsSource.catchUp(this) } catch (_: Exception) { }   // what came while closed; the other phone hears about it too
             reloadUi()
             if (store.getStr("sync_pending") != null) try { Sync.flushPending(store) } catch (_: Exception) { }
             if (Updater.shouldAutoCheck(this)) { Updater.check(this); reloadUi() }
@@ -137,6 +139,7 @@ class MainActivity : Activity() {
             if (!SmsSource.hasPermission(this)) {
                 Toast.makeText(this, "من غير الإذن ده التطبيق مش هيقدر يقرا الرسايل", Toast.LENGTH_LONG).show()
             }
+            WatchService.start(this)
             Thread {
                 SmsSource.scanInbox(this)
                 Notifier.check(this, store)
@@ -291,6 +294,28 @@ class MainActivity : Activity() {
                         startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
                     } catch (_: Exception) { }
                 }
+            }
+        }
+
+        /**
+         * "Start by itself" (auto-start) screen: Infinix/Tecno/itel (Phone Master), then Xiaomi, Oppo/Realme,
+         * Vivo, Huawei; any other phone gets the app's own settings page.
+         */
+        @JavascriptInterface
+        fun openAutostart() {
+            main.post {
+                val tries = listOf(
+                    ComponentName("com.transsion.phonemaster", "com.cyin.himgr.autostart.AutoStartActivity"),
+                    ComponentName("com.transsion.phonemanager", "com.itel.autobootmanager.activity.AutoBootMgrActivity"),
+                    ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+                    ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
+                    ComponentName("com.oplus.safecenter", "com.oplus.safecenter.permission.startup.StartupAppListActivity"),
+                    ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"),
+                    ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"))
+                for (c in tries) {
+                    try { startActivity(Intent().setComponent(c).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return@post } catch (_: Exception) { }
+                }
+                try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: Exception) { }
             }
         }
 

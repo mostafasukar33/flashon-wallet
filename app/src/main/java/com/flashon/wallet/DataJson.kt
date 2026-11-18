@@ -22,6 +22,7 @@ object DataJson {
         o.put("versionCode", Updater.currentCode(ctx))
         o.put("permission", SmsSource.hasPermission(ctx))
         o.put("batteryOk", pm.isIgnoringBatteryOptimizations(ctx.packageName))
+        o.put("watch", WatchService.running)
         o.put("settings", JSONObject()
             .put("monthReceive", lim.monthReceive).put("monthSend", lim.monthSend)
             .put("daySend", lim.daySend).put("dayReceiveOn", lim.dayReceiveOn)

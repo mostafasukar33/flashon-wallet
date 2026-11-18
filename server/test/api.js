@@ -157,6 +157,10 @@ const sample = (balance) => ({ t: Date.now() - 120000, data: {
     await pg.evaluate(() => App.reload());
     await pg.waitForFunction(() => document.body.innerText.includes('9,999'), null, {timeout: 8000}).catch(() => {});
     eq('الرقم الجديد وصل', (await pg.innerText('body')).includes('9,999'), true);
+    // والإشعارات شغالة كمان: الصفحة بتجيب الجديد لوحدها من غير ما حد يدوس (كانت بتستنى الإشعار بس)
+    await fetch(S, {method: 'PUT', headers: phone(), body: snap(L.key, 4321)});
+    await pg.waitForFunction(() => document.body.innerText.includes('4,321'), null, {timeout: 25000}).catch(() => {});
+    eq('الحساب الجديد بيظهر لوحده والصفحة مفتوحة', (await pg.innerText('body')).includes('4,321'), true);
     eq('قفل اللينك', (await fetch(S, {method: 'DELETE', headers: phone()})).status, 200);
     eq('بعد القفل مفيش حاجة', (await fetch(S, {headers: viewer()})).status, 404);
     await pg.evaluate(() => App.reload()); await pg.waitForTimeout(800);
