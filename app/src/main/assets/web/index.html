@@ -102,6 +102,8 @@ h2{margin:0;font-size:16px;font-weight:700}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:10px;padding:10px 16px;font-size:14px;z-index:20;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.show{opacity:1}
 .logo{width:96px;height:96px;border-radius:24px;align-self:center}
+html.view [data-act=settings],html.view [data-act=dl],html.view [data-act=rename],html.view [data-act=accname],html.view .fix{display:none!important}
+.linkbox{direction:ltr;text-align:left;font-size:13px;word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;color:var(--ink2)}
 </style>
 </head>
 <body>
@@ -115,7 +117,9 @@ h2{margin:0;font-size:16px;font-weight:700}
 'use strict';
 
 /* ---------- bridge (real phone, or sample data in a browser) ---------- */
-var B = window.Android;
+var B = window.Android || window.WalletView;
+var VIEW = !!(B && B.viewOnly);
+if (VIEW) document.documentElement.classList.add('view');
 if (!B) {
   var mock = {
     version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:false, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
@@ -141,6 +145,9 @@ if (!B) {
     setLines:function(j){mock.lines=j==='null'?{}:JSON.parse(j);setTimeout(App.reload,50)},
     setAccountLimits:function(k,j){mock.now.forEach(function(a){if(a.w===k){a.limits=j==='null'?null:JSON.parse(j);if(a.limits)a.limits.own=true}});setTimeout(App.reload,50)},
     setTxNotify:function(v){mock.txNotify=v},
+    setSync:function(on){mock.sync=on?{on:true,link:'https://wallet.flashoneg.com/#tryid.trykey',last:Date.now(),error:null}:{on:false};setTimeout(App.reload,300)},
+    shareSync:function(){toast('بيفتح المشاركة…')},
+    copySync:function(){toast('اتنسخ')},
     exportMonth:function(){toast('بيعمل الملف…')},
     setName:function(p,n){mock.txs.forEach(function(t){if(t.phone===p)t.name=n||t.smsName||p});setTimeout(App.reload,50)},
     saveSettings:function(j){mock.settings=JSON.parse(j);setTimeout(App.reload,50)},
@@ -374,8 +381,8 @@ function unknownScreen(){
     h+='<div class="card col" style="gap:12px"><div class="row xs mute"><span>'+esc(accLabel(u.w))+'</span><span>'+dayF.format(new Date(u.time))+' · '+timeF.format(new Date(u.time))+'</span></div>'+
       '<div class="msg">'+esc(u.body)+'</div>'+
       '<div class="row small" style="justify-content:flex-start;gap:16px"><span>المبلغ: <b class="num">'+fmt(u.amount)+'</b></span>'+(u.phone?'<span>الرقم: <b class="num">'+esc(u.phone)+'</b></span>':'')+'</div>'+
-      '<b style="font-size:15px">دي إيه؟</b><div class="btn3"><button class="b-in" data-act="settype" data-id="'+esc(u.id)+'" data-t="in" data-learn="1">وارد</button><button class="b-out" data-act="settype" data-id="'+esc(u.id)+'" data-t="out" data-learn="1">صادر</button><button class="b-no" data-act="settype" data-id="'+esc(u.id)+'" data-t="ignore" data-learn="1">تجاهل</button></div>'+
-      '<span class="xs mute">"تجاهل" للرسايل اللي مش عمليات، زي العروض.</span></div>';
+      '<div class="col fix" style="gap:12px"><b style="font-size:15px">دي إيه؟</b><div class="btn3"><button class="b-in" data-act="settype" data-id="'+esc(u.id)+'" data-t="in" data-learn="1">وارد</button><button class="b-out" data-act="settype" data-id="'+esc(u.id)+'" data-t="out" data-learn="1">صادر</button><button class="b-no" data-act="settype" data-id="'+esc(u.id)+'" data-t="ignore" data-learn="1">تجاهل</button></div>'+
+      '<span class="xs mute">"تجاهل" للرسايل اللي مش عمليات، زي العروض.</span></div></div>';
   });
   return h+'</div>';
 }
@@ -422,6 +429,21 @@ function settingsScreen(){
     num('s_dr','حد الاستلام في اليوم',st.dayReceive)+
     '<button class="btn main" data-act="save">احفظ</button></div>';
 
+  var sy=D.sync||{on:false};
+  h+='<div class="card col" style="gap:10px"><h2>شوفه من موبايل تاني</h2>';
+  if (!sy.on) {
+    h+='<span class="small mute" style="line-height:1.7">افتح الحساب من الآيفون أو أي موبايل تاني بلينك، للاطلاع بس. الحساب بيتقفل بمفتاح قبل ما يطلع من هنا، والمفتاح جوه اللينك بس، فمحدش يقدر يقراه غير اللي معاه اللينك.</span>'+
+      '<button class="btn main" data-act="syncon">اعمل لينك</button>';
+  } else {
+    h+='<div class="linkbox">'+esc(sy.link)+'</div>'+
+      '<div class="grid2"><button class="btn ghost" data-act="synccopy">انسخ</button><button class="btn ghost" data-act="syncshare">ابعته</button></div>'+
+      '<span class="xs mute" style="line-height:1.6">'+(sy.error?'آخر رفع ماتمش ('+esc(sy.error)+')، هيحاول تاني مع أول عملية.':(sy.last?'آخر رفع '+dayF.format(new Date(sy.last))+' · '+timeF.format(new Date(sy.last)):'لسه بيرفع…'))+'</span>'+
+      '<span class="xs mute" style="line-height:1.6">افتحه في سفاري على الآيفون، ومن زرار المشاركة اختار "Add to Home Screen" يبقى أيقونة زي التطبيق. أي حد معاه اللينك يقدر يشوف، فمتبعتهوش لحد.</span>'+
+      '<div class="grid2"><button class="btn ghost" data-act="syncnew">لينك جديد</button><button class="btn ghost" data-act="syncoff">اقفله</button></div>'+
+      '<span class="xs mute" style="line-height:1.6">"لينك جديد" بيقفل القديم، لو حسيت إنه وصل لحد.</span>';
+  }
+  h+='</div>';
+
   h+='<div class="card col" style="gap:6px"><h2>الإشعارات</h2>'+
     '<label class="switch"><span style="font-size:15px">إشعار مع كل عملية</span><input type="checkbox" id="s_txn"'+(D.txNotify?' checked':'')+'></label>'+
     '<span class="xs mute" style="line-height:1.6">أول ما فلوس تدخل أو تخرج يجيلك إشعار بالمبلغ والاسم والرصيد. تنبيهات الحدود بتيجي دايماً.</span></div>';
@@ -455,7 +477,7 @@ function txSheet(id){
     (t.balance!=null?'<div class="row"><span class="mute">الرصيد بعدها</span><span class="num">'+fmt2(t.balance)+'</span></div>':'')+
     '</div><div class="msg">'+esc(t.body || (B.getBody ? B.getBody(t.id) : ''))+'</div>';
   if (t.phone) h+='<button class="btn ghost" data-act="person" data-p="'+esc(t.phone)+'">كل عمليات '+esc(t.name)+'</button>';
-  h+='<span class="small mute">النوع غلط؟ صححه:</span><div class="btn3"><button class="b-in" data-act="settype" data-id="'+esc(t.id)+'" data-t="in">وارد</button><button class="b-out" data-act="settype" data-id="'+esc(t.id)+'" data-t="out">صادر</button><button class="b-no" data-act="settype" data-id="'+esc(t.id)+'" data-t="ignore">مش عملية</button></div>';
+  if (!VIEW) h+='<span class="small mute">النوع غلط؟ صححه:</span><div class="btn3"><button class="b-in" data-act="settype" data-id="'+esc(t.id)+'" data-t="in">وارد</button><button class="b-out" data-act="settype" data-id="'+esc(t.id)+'" data-t="out">صادر</button><button class="b-no" data-act="settype" data-id="'+esc(t.id)+'" data-t="ignore">مش عملية</button></div>';
   openSheet(h);
 }
 
@@ -522,6 +544,10 @@ document.addEventListener('click', function(e){
       B.saveSettings(JSON.stringify({monthReceive:v('s_mr'),monthSend:v('s_ms'),daySend:v('s_ds'),dayReceiveOn:document.getElementById('s_dro').checked,dayReceive:v('s_dr'),feesCount:document.getElementById('s_fee').checked}));
       toast('اتحفظ'); break;
     case 'rescan': B.rescan(); toast('بيقرا الرسايل…'); break;
+    case 'syncon': case 'syncnew': B.setSync(true); toast('بيعمل اللينك…'); break;
+    case 'syncoff': B.setSync(false); toast('بيقفله…'); break;
+    case 'synccopy': B.copySync(); break;
+    case 'syncshare': B.shareSync(); break;
     case 'chkupd': B.checkUpdate(); toast('بيشوف…'); break;
     case 'dl': B.downloadUpdate(); toast('بينزل التحديث…'); break;
   }

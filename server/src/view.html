@@ -1,0 +1,107 @@
+<style>
+#vnote{position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;justify-content:center;pointer-events:none;padding:0 12px calc(10px + env(safe-area-inset-bottom))}
+#vnote span{pointer-events:auto;background:rgba(22,24,27,.86);color:#fff;font-size:13px;border-radius:999px;padding:7px 14px;line-height:1.5;text-align:center}
+#vnote.bad span{background:#A33A1E}
+body{padding-bottom:56px}
+</style>
+<script>
+/* Read-only window on the Android app: the link carries <id>.<key> after #, the key never reaches the server. */
+(function(){
+  'use strict';
+  var ls=null; try{ ls=window.localStorage; ls.getItem('x'); }catch(e){ ls=null; }
+  function lget(k){ try{ return ls?ls.getItem(k):null; }catch(e){ return null; } }
+  function lset(k,v){ try{ if(ls) ls.setItem(k,v); }catch(e){} }
+  function ldel(k){ try{ if(ls) ls.removeItem(k); }catch(e){} }
+
+  var h=(location.hash||'').slice(1);
+  if (/^[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/.test(h)) { if (lget('wv_link')!==h) { ldel('wv_blob'); ldel('wv_at'); } lset('wv_link',h); }
+  else { h=lget('wv_link')||''; if (h) try{ history.replaceState(null,'','#'+h); }catch(e){} }
+  var parts=h.split('.'), id=parts[0], k64=parts[1];
+
+  function unb64(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='='; var b=atob(s), u=new Uint8Array(b.length); for(var i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
+  function tob64(u){ var s='', C=0x8000; for(var i=0;i<u.length;i+=C) s+=String.fromCharCode.apply(null,u.subarray(i,i+C)); return btoa(s); }
+
+  var keyP=null;
+  function key(){ return keyP || (keyP=crypto.subtle.importKey('raw', unb64(k64), {name:'AES-GCM'}, false, ['decrypt'])); }
+  function open(buf){
+    var u=new Uint8Array(buf);
+    if (u[0]!==1) return Promise.reject(new Error('ver'));
+    return key().then(function(k){ return crypto.subtle.decrypt({name:'AES-GCM', iv:u.slice(1,13)}, k, u.slice(13)); })
+      .then(function(gz){ return new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).text(); })
+      .then(function(t){ return JSON.parse(t); });
+  }
+
+  var bodies={}, last='', stamp=0, at=lget('wv_at')||'', state='', busy=false;
+  function show(w){
+    var o=w.data||{}; bodies=o.bodies||{}; delete o.bodies;
+    stamp=w.t||0; last=JSON.stringify(o);
+    if (window.App) App.setData(last);
+    note();
+  }
+
+  var ago;
+  try{ ago=new Intl.RelativeTimeFormat('ar-EG-u-nu-latn',{numeric:'auto'}); }catch(e){ ago=null; }
+  function since(t){
+    var s=Math.round((t-Date.now())/1000), a=Math.abs(s);
+    if (!ago) return new Date(t).toLocaleString();
+    if (a<45) return 'دلوقتي';
+    if (a<3600) return ago.format(Math.round(s/60),'minute');
+    if (a<86400) return ago.format(Math.round(s/3600),'hour');
+    return ago.format(Math.round(s/86400),'day');
+  }
+  function note(){
+    var n=document.getElementById('vnote'); if(!n){ if(!document.body) return; n=document.createElement('div'); n.id='vnote'; n.innerHTML='<span></span>'; document.body.appendChild(n); }
+    var msg = state==='gone' ? 'اللينك ده اتقفل أو اتغير من التطبيق'
+      : state==='badkey' ? 'اللينك ناقص أو متغير، انسخه تاني من التطبيق'
+      : state==='old' ? 'المتصفح ده قديم، حدّث الآيفون أو افتحه في سفاري'
+      : !stamp ? (state==='net'?'مفيش نت':'بيجيب الحساب…')
+      : 'آخر تحديث من الموبايل '+since(stamp)+(state==='net'?' · مفيش نت دلوقتي':'');
+    n.className=(state&&state!=='net')||(state==='net'&&!stamp)?'bad':'';
+    n.firstChild.textContent=msg;
+  }
+
+  function pull(){
+    if (!id || busy) return; busy=true;
+    fetch('/api/s/'+id+(at&&last?'?since='+encodeURIComponent(at):''), {cache:'no-store'}).then(function(r){
+      if (r.status===204) { state=''; return null; }
+      if (r.status===404) { state='gone'; ldel('wv_blob'); return null; }
+      if (!r.ok) throw new Error('http');
+      var nat=r.headers.get('X-At')||'';
+      return r.arrayBuffer().then(function(buf){
+        return open(buf).then(function(w){
+          state=''; at=nat; lset('wv_at',at);
+          if (buf.byteLength < 3000000) lset('wv_blob', tob64(new Uint8Array(buf)));
+          show(w);
+        }, function(){ state='badkey'; });
+      });
+    }).catch(function(){ state='net'; }).then(function(){ busy=false; note(); });
+  }
+
+  function noop(){ var t=document.getElementById('toast'); if(!t) return; t.textContent='التعديل من الموبايل الأندرويد بس'; t.classList.add('show'); setTimeout(function(){t.classList.remove('show')},2200); }
+  var base={
+    viewOnly:true,
+    getCached:function(){ return ''; },
+    getData:function(){ return last; },
+    refresh:function(){ pull(); },
+    getBody:function(x){ return bodies[x]||''; }
+  };
+  window.WalletView = (typeof Proxy==='function') ? new Proxy(base,{get:function(t,p){ return p in t ? t[p] : noop; }}) : base;
+
+  function start(){
+    if (!id || !k64) {
+      document.getElementById('app').innerHTML='<div class="wrap" style="padding-top:22vh;gap:14px;text-align:center;align-items:center"><h1>محافظي</h1><span class="mute" style="line-height:1.8;font-size:16px">افتح اللينك اللي في التطبيق على الأندرويد:<br>الإعدادات ← شوفه من موبايل تاني</span></div>';
+      return;
+    }
+    if (!(window.crypto&&crypto.subtle&&window.DecompressionStream)) { state='old'; note(); return; }
+    note();
+    var cached=lget('wv_blob');
+    if (cached) { try{ open(unb64(cached.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')).buffer).then(function(w){ if(!last) show(w); }, function(){}); }catch(e){} }
+    // App.reload() in the page already asked for fresh data; keep it fresh while the page is open
+    setInterval(function(){ if (document.visibilityState!=='hidden') pull(); }, 20000);
+    setInterval(note, 30000);
+    document.addEventListener('visibilitychange', function(){ if (document.visibilityState==='visible') pull(); });
+    window.addEventListener('pageshow', function(e){ if (e.persisted) pull(); });
+  }
+  if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', start); else start();
+})();
+</script>

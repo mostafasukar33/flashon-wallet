@@ -28,6 +28,7 @@ object DataJson {
             .put("dayReceive", lim.dayReceive).put("feesCount", lim.feesCount))
         o.put("update", Updater.cached(ctx))
         o.put("txNotify", store.txNotify)
+        o.put("sync", Sync.state(store))
 
         // wallet setup: what the user chose per SIM line, and what the messages show
         val lines = store.lines()

@@ -13,11 +13,15 @@ https://github.com/mostafasukar33/flashon-wallet/releases/latest/download/flasho
 
 الرسايل والأرقام والفلوس كلها بتفضل جوه الموبايل. التطبيق مش بيبعت أي بيانات لأي حتة. الإنترنت بيتستخدم بس عشان يشوف فيه نسخة جديدة.
 
+الاستثناء الوحيد لو شغّلت بنفسك **«شوفه من موبايل تاني»** من الإعدادات: الحساب بيتقفل بمفتاح جوه الموبايل قبل ما يترفع على `wallet.flashoneg.com`، والمفتاح جوه اللينك بعد `#` بس (المتصفح مبيبعتش الجزء ده للسيرفر)، فالسيرفر شايل بايتات مقفولة ميقدرش يقراها. «اقفله» بيمسح النسخة من السيرفر، و«لينك جديد» بيقفل القديم.
+
 ## للمطور
 
 - `app/src/main/java/com/flashon/wallet/core/` قراية الرسايل وحسبة الحدود (Kotlin من غير أندرويد).
 - `coretest/Test.kt` تجارب على رسايل حقيقية:
   `kotlinc app/src/main/java/com/flashon/wallet/core/*.kt coretest/Test.kt -include-runtime -d t.jar && java -jar t.jar`
 - `app/src/main/assets/web/index.html` الشاشات.
+- `server/` سيرفر كلاود فلير لـ «شوفه من موبايل تاني» (`wallet.flashoneg.com`): بيشيل النسخة المقفولة، ويعرض نفس الشاشات للاطلاع بس (`server/src/view.html` بيفك القفل في المتصفح). التشفير في `Sync.kt`.
+  اختبار: `cd server && npm install && node test/api.js`، والرفع: `CLOUDFLARE_API_TOKEN="$cloudflare_api_token" npx wrangler deploy`. السيرفر بيقرا الشاشات من `app/src/main/assets/web`، فأي تعديل فيها يترفع عليه كمان.
 - كل push على `main` بيبني APK موقّع وينزله كـ release اسمه `v<رقم البناء>`.
 - مفتاح التوقيع في `signing/` لازم يفضل هو هو، وإلا التحديثات مش هتتسطب فوق النسخة القديمة.

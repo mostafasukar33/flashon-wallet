@@ -196,6 +196,7 @@ class Store(context: Context) {
     // ---------- small memory (notifications, updates) ----------
     fun getStr(k: String): String? = prefs.getString(k, null)
     fun putStr(k: String, v: String) = prefs.edit().putString(k, v).apply()
+    fun remove(k: String) = prefs.edit().remove(k).apply()
     fun getLong(k: String): Long = prefs.getLong(k, 0L)
     fun putLong(k: String, v: Long) = prefs.edit().putLong(k, v).apply()
     fun getDouble(k: String): Double = prefs.getFloat(k, -1f).toDouble()

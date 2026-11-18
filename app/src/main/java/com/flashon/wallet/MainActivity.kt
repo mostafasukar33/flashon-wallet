@@ -111,6 +111,7 @@ class MainActivity : Activity() {
                     store.saveScreen(json)
                     val q = JSONObject.quote(json)
                     main.post { if (::web.isInitialized) web.evaluateJavascript("window.App&&App.setData($q)", null) }
+                    if (Sync.isOn(store)) Thread { try { Sync.pushIfOn(this, store, json) } catch (_: Exception) { } }.start()
                 }
             } finally {
                 building.set(false)
@@ -218,6 +219,38 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun setTxNotify(on: Boolean) { store.txNotify = on; reloadUi() }
+
+        /** Watch from another phone: on = new link, off = stop and wipe the copy on the server. */
+        @JavascriptInterface
+        fun setSync(on: Boolean) {
+            Thread {
+                if (on) Sync.enable(this@MainActivity, store) else Sync.disable(store)
+                reloadUi()
+                main.post {
+                    val msg = if (!on) "اللينك اتقفل" else if (store.getStr("sync_err") != null) "اللينك جاهز، بس الرفع مستني النت" else "اللينك جاهز ✓"
+                    Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                }
+            }.start()
+        }
+
+        @JavascriptInterface
+        fun shareSync() {
+            val link = Sync.link(store) ?: return
+            main.post {
+                val i = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, link)
+                try { startActivity(Intent.createChooser(i, "ابعت اللينك")) } catch (_: Exception) { }
+            }
+        }
+
+        @JavascriptInterface
+        fun copySync() {
+            val link = Sync.link(store) ?: return
+            main.post {
+                val cm = getSystemService(android.content.ClipboardManager::class.java)
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("محافظي", link))
+                Toast.makeText(this@MainActivity, "اتنسخ", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         @JavascriptInterface
         fun exportMonth(month: String, account: String) {

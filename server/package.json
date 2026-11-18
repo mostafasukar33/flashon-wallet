@@ -1,0 +1,11 @@
+{
+  "name": "flashon-wallet-server",
+  "private": true,
+  "scripts": {
+    "test": "node test/api.js",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "wrangler": "^4.156.2"
+  }
+}

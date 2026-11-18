@@ -1,0 +1,14 @@
+// "شوفه من موبايل تاني": wallet.flashoneg.com
+// التطبيق بيرفع الحساب مقفول بمفتاح (AES-GCM)، والمفتاح في اللينك بعد # بس، فالسيرفر عمره ما بيشوف أرقام.
+// الشاشات هي نفس app/src/main/assets/web/index.html، والسيرفر بيحط فيها view.html (وضع الاطلاع بس).
+// الرفع: cd server && node test/api.js && CLOUDFLARE_API_TOKEN="$cloudflare_api_token" npx wrangler deploy
+// ممنوع route بنجمة *.flashoneg.com (هيخطف برنامج الحسابات)
+{
+  "name": "flashon-wallet",
+  "main": "src/index.js",
+  "compatibility_date": "2025-10-01",
+  "assets": { "directory": "../app/src/main/assets/web", "binding": "ASSETS", "run_worker_first": ["/", "/index.html", "/api/*", "/icon.png", "/manifest.webmanifest"] },
+  "durable_objects": { "bindings": [ { "name": "BOX", "class_name": "Box" } ] },
+  "migrations": [ { "tag": "v1", "new_sqlite_classes": ["Box"] } ],
+  "routes": [ { "pattern": "wallet.flashoneg.com", "custom_domain": true } ]
+}

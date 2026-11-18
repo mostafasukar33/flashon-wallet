@@ -111,6 +111,7 @@ class SmsReceiver : BroadcastReceiver() {
                     Notifier.announce(context, store, list.map { it.id }.filter { it !in before })
                     Notifier.check(context, store)
                     MainActivity.refreshIfOpen()
+                    Sync.pushIfOn(context, store)
                 }
             } catch (_: Exception) {
             } finally {
