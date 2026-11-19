@@ -25,7 +25,7 @@ const sample = (balance) => ({ t: Date.now() - 120000, data: {
   summaries: {'2026-11': {vf: {inTotal: 7000, outTotal: 500, fees: 0, count: 2, start: 0, end: balance, received: 7000, sent: 500}}},
   txs: [{id: 'a1', w: 'vf', p: 'vf', type: 'in', kind: 'استلام', amount: 7000, fee: 0, balance, phone: '01011112222', name: 'تجربة', smsName: 'تجربة', time: Date.now() - 3600000, how: 'words'}],
   unknown: [], bodies: {a1: 'رسالة تجربة: تم استلام مبلغ 7000 جنيه'},
-  xfer: {ready: true, remote: true, busy: false, accounts: [{w: 'vfs3', label: 'فودافون كاش – خط 1', n: '1', own: '01000000000', can: balance, bal: balance}, {w: 'vfs5', label: 'فودافون كاش – خط 2', n: '2', own: '01000000001', can: 900, bal: 900}], list: []}
+  xfer: {ready: true, remote: true, busy: false, smsApp: true, accounts: [{w: 'vfs3', label: 'فودافون كاش – خط 1', n: '1', own: '01000000000', can: balance, bal: balance}, {w: 'vfs5', label: 'فودافون كاش – خط 2', n: '2', own: '01000000001', can: 900, bal: 900}], list: []}
 }});
 
 /* طلب التحويل من الآيفون: نفس view.html (نسخة 3، ومربوط بالاستخدام ده) */
@@ -129,24 +129,6 @@ function wsOpen(port, path, tok) {
     eq('صفحة الآيفون بتعرف إن الأندرويد متصل', (await fetch(S, {headers: viewer()})).headers.get('x-live'), '1');
     ws.close(); await new Promise(r => setTimeout(r, 500));
     eq('… ولما يقفل بتعرف', (await fetch(S, {headers: viewer()})).headers.get('x-live'), '0');
-    // الجرس: كروم على الأندرويد بيشترك بكلمة لمرة واحدة، والسيرفر بيرن عليه مع كل طلب
-    const word = b64(crypto.randomBytes(24));
-    eq('كلمة الجرس من غير مفتاح الموبايل مرفوضة', (await fetch(S + '/belltok', {method: 'POST', body: word})).status, 401);
-    eq('الموبايل بيعمل كلمة للجرس', (await fetch(S + '/belltok', {method: 'POST', headers: phone(), body: word})).status, 200);
-    const bellSub = {endpoint: PS + '/push/bell', keys: {p256dh: b64(crypto.randomBytes(65)), auth: b64(crypto.randomBytes(16))}};
-    eq('اشتراك الجرس بكلمة غلط مرفوض', (await fetch(S + '/bellsub', {method: 'POST', headers: {'x-bell': b64(crypto.randomBytes(24)), 'content-type': 'application/json'}, body: JSON.stringify(bellSub)})).status, 403);
-    eq('كروم بيشترك في الجرس', (await fetch(S + '/bellsub', {method: 'POST', headers: {'x-bell': word, 'content-type': 'application/json'}, body: JSON.stringify(bellSub)})).status, 200);
-    eq('صفحة الآيفون بتعرف إن فيه جرس', (await fetch(S, {headers: viewer()})).headers.get('x-live'), 'b');
-    const before = got.length;
-    const rr = await (await fetch(C, {method: 'POST', headers: viewer(), body: sealCmd(L.key, {...cmd1, id: 'bell12345678'})})).json();
-    eq('الطلب بيرن الجرس', rr.bell, 1);
-    const ringed = got.slice(before).find(x => x.path === '/push/bell');
-    eq('… رنة فاضية (مفيهاش أي حاجة تتقري)', ringed && ringed.body.length, 0);
-    eq('… وبتوقيع السيرفر', !!(ringed && /^vapid t=/.test(ringed.h.authorization || '')), true);
-    eq('الأندرويد بيعرف إن الجرس شغال', (await (await fetch(C, {headers: phone()})).json()).bells, 1);
-    await fetch(C + '?upto=999', {method: 'DELETE', headers: phone()});
-    eq('صفحة الجرس موجودة', (await (await fetch(U + '/bell')).text()).includes('جرس محافظي'), true);
-    eq('ملف الإشعارات بيعرض الجرس', (await (await fetch(U + '/sw.js')).text()).includes('🔔 محافظي'), true);
     eq('طلب والأندرويد مش متصل بيستنى', (await (await fetch(C, {method: 'POST', headers: viewer(), body: sealCmd(L.key, {...cmd1, id: 'second123456'})})).json()).live, false);
     eq('… ويلاقيه أول ما يتصل', (await (await fetch(C, {headers: phone()})).json()).cmds.length, 1);
     await fetch(C + '?upto=999', {method: 'DELETE', headers: phone()});
@@ -275,7 +257,18 @@ function wsOpen(port, path, tok) {
     eq('من غير زرار مشاركة: الصورة نفسها تتحفظ بالضغط عليها', !!src && src.startsWith('data:image/png;base64,') && src.length > 20000, true);
     await pg.evaluate(() => document.getElementById('sheetBg').click());
     await fetch(C + '?upto=999', {method: 'DELETE', headers: phone()});
-    ws2.close();
+    ws2.close(); await new Promise(r => setTimeout(r, 500));
+    // الأندرويد مش على الخط (شاشته مطفية): بعد الطلب الآيفون بيعرض رسالة الصحيان جاهزة
+    await pg.evaluate(() => App.reload()); await pg.waitForTimeout(800);
+    await pg.click('[data-act=xfer]'); await pg.waitForTimeout(300);
+    await pg.fill('#xf_to', '01012345678'); await pg.fill('#xf_a', '20'); await pg.fill('#xf_pin', '654321');
+    await pg.click('[data-act=xnext]'); await pg.waitForTimeout(300); await pg.click('[data-act=xgo]');
+    await pg.waitForFunction(() => document.getElementById('sheet').innerText.includes('صحّي الأندرويد'), null, {timeout: 6000}).catch(() => {});
+    const wake = await pg.getAttribute('#sheet a.btn', 'href').catch(() => null);
+    eq('الآيفون بيجهّز رسالة الصحيان لرقم الأندرويد', wake, 'sms:01000000001&body=' + encodeURIComponent('🔔 محافظي: طلب تحويل'));
+    await pg.screenshot({path: (process.env.SHOT || '/tmp/wallet') + '-wake.png'});
+    await pg.evaluate(() => document.getElementById('sheetBg').click());
+    await fetch(C + '?upto=999', {method: 'DELETE', headers: phone()});
     // تحديث من الموبايل بيوصل لوحده
     await fetch(S, {method: 'PUT', headers: phone(), body: snap(L.key, 9999)});
     await pg.evaluate(() => App.reload());

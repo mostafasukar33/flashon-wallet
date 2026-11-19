@@ -73,7 +73,7 @@ object SmsApp {
         if (on && at == 0L) store.putLong("smsapp_at", System.currentTimeMillis())
         if (!on && at != 0L) store.putLong("smsapp_at", 0)
         return JSONObject().put("on", on).put("can", available(ctx)).put("at", store.getLong("smsapp_at"))
-            .put("unread", if (on) unread(ctx) else 0)
+            .put("unread", if (on) unread(ctx) else 0).put("lines", if (on) unreadByLine(ctx) else JSONArray())
     }
 
     private fun unread(ctx: Context): Int = try {
@@ -281,35 +281,65 @@ object SmsApp {
     // ---------- the messages screen ----------
 
     /** Conversations, newest first: name, last message, unread count. Blocking. */
+    /**
+     * Conversations, newest first, one per conversation and SIM line (the screen shows a tab for each line):
+     * name, last message on that line, unread count. A SIM that isn't in the phone any more counts as line 1.
+     */
     fun threads(ctx: Context, store: Store): JSONObject {
         val out = JSONArray()
-        val byThread = HashMap<Long, JSONObject>()
+        val byKey = HashMap<String, JSONObject>()
         var unread = 0
         val names = Names(ctx, store)
+        val lines = subs(ctx)
+        val perLine = LinkedHashMap<Int, Int>().apply { for (x in lines) put(x, 0) }
+        fun lineOf(sub: Int) = if (sub in lines) sub else (lines.firstOrNull() ?: -1)
         try {
             ctx.contentResolver.query(Telephony.Sms.CONTENT_URI,
-                arrayOf(Telephony.Sms.THREAD_ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.READ),
+                arrayOf(Telephony.Sms.THREAD_ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.READ, Telephony.Sms.SUBSCRIPTION_ID),
                 null, null, Telephony.Sms.DATE + " DESC")?.use { c ->
                 var rows = 0
                 while (c.moveToNext() && rows++ < 5000) {
                     val type = c.getInt(4)
                     if (type == Telephony.Sms.MESSAGE_TYPE_DRAFT) continue
                     val t = c.getLong(0)
-                    var j = byThread[t]
+                    val line = lineOf(if (c.isNull(6)) -1 else c.getInt(6))
+                    val key = "$t/$line"
+                    var j = byKey[key]
                     if (j == null) {
-                        if (byThread.size >= 200) continue
+                        if (byKey.size >= 300) continue
                         val addr = c.getString(1) ?: ""
                         j = JSONObject().put("id", t.toString()).put("addr", addr).put("name", names.of(addr) ?: JSONObject.NULL)
                             .put("snippet", (c.getString(2) ?: "").replace('\n', ' ').take(140)).put("time", c.getLong(3))
-                            .put("out", type != Telephony.Sms.MESSAGE_TYPE_INBOX).put("unread", 0)
-                        byThread[t] = j
+                            .put("out", type != Telephony.Sms.MESSAGE_TYPE_INBOX).put("unread", 0).put("sub", line)
+                        byKey[key] = j
                         out.put(j)
                     }
-                    if (type == Telephony.Sms.MESSAGE_TYPE_INBOX && c.getInt(5) == 0) { j.put("unread", j.getInt("unread") + 1); unread++ }
+                    if (type == Telephony.Sms.MESSAGE_TYPE_INBOX && c.getInt(5) == 0) {
+                        j.put("unread", j.getInt("unread") + 1); unread++
+                        perLine[line] = (perLine[line] ?: 0) + 1
+                    }
                 }
             }
         } catch (_: Exception) { }
-        return JSONObject().put("threads", out).put("unread", unread)
+        val ls = JSONArray(); for ((sub, n) in perLine) ls.put(JSONObject().put("sub", sub).put("unread", n))
+        return JSONObject().put("threads", out).put("unread", unread).put("lines", ls)
+    }
+
+    /** Unread messages per SIM line, line 1 first (the messages card on the main screen). */
+    fun unreadByLine(ctx: Context): JSONArray {
+        val lines = subs(ctx)
+        val per = LinkedHashMap<Int, Int>().apply { for (x in lines) put(x, 0) }
+        try {
+            ctx.contentResolver.query(Telephony.Sms.Inbox.CONTENT_URI, arrayOf(Telephony.Sms.SUBSCRIPTION_ID), Telephony.Sms.READ + "=0", null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val sub = if (c.isNull(0)) -1 else c.getInt(0)
+                    val line = if (sub in lines) sub else (lines.firstOrNull() ?: -1)
+                    per[line] = (per[line] ?: 0) + 1
+                }
+            }
+        } catch (_: Exception) { }
+        val out = JSONArray(); for ((sub, n) in per) out.put(JSONObject().put("sub", sub).put("unread", n))
+        return out
     }
 
     /** One conversation, oldest first; marks it read. [threadId] <= 0: the conversation with [addr] (a new one if none). Blocking. */
@@ -397,9 +427,13 @@ object SmsApp {
 class SmsDeliverReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         WatchService.saw("dlv")
-        val all = SmsReceiver.split(context, intent)
-        if (all.isEmpty()) return
+        val got = SmsReceiver.split(context, intent)
+        if (got.isEmpty()) return
         val app = context.applicationContext
+        // the iPhone's wake-up SMS: fetch its transfer request now; it isn't a message to keep or show
+        if (got.any { Remote.isWake(it.body) }) { WatchService.saw("wake"); Remote.ring(app) }
+        val all = got.filter { !Remote.isWake(it.body) }
+        if (all.isEmpty()) return
         val pending = goAsync()
         val wl = SmsSource.awake(app, "dlv", 90_000L)
         val done = CountDownLatch(1)

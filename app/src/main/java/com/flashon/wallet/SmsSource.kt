@@ -135,7 +135,9 @@ object SmsSource {
 class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         WatchService.saw("rcv")
-        val ins = wallet(split(context, intent))
+        val got = split(context, intent)
+        if (got.any { Remote.isWake(it.body) }) Remote.ring(context)   // the iPhone's wake-up SMS (when awake anyway)
+        val ins = wallet(got)
         if (ins.isEmpty()) return
         val pending = goAsync()
         Thread {

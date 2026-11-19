@@ -46,8 +46,6 @@ object Remote {
         }
         if (upto > 0) try { Sync.call("DELETE", "/api/s/$id/cmd?upto=$upto", store) } catch (_: Exception) { }
         store.putLong("rm_fetch", System.currentTimeMillis())
-        // how many doorbells (Chrome on this phone) the server can ring: shown in the settings
-        try { val n = JSONObject(r.second).optLong("bells", -1); if (n >= 0 && n != store.getLong("bell_n")) { store.putLong("bell_n", n); MainActivity.refreshIfOpen() } } catch (_: Exception) { }
     }
 
     private fun run(app: Context, store: Store, sealed: ByteArray) {
@@ -84,29 +82,24 @@ object Remote {
         return false
     }
 
-    // ---------- the doorbell ----------
-
-    /** The title of the doorbell notification Chrome shows (server/src/sw.txt). */
-    const val BELL_TITLE = "🔔 محافظي"
+    // ---------- the wake-up SMS ----------
 
     /**
-     * A new one-time word for the doorbell page, registered on the server; returns the page to open in Chrome
-     * (/bell#<id>.<word>), or null without internet. Blocking.
+     * The SMS the iPhone sends to wake this phone ("🔔 محافظي: طلب تحويل"). Infinix freezes «محافظي» whenever
+     * the screen is off, and lets nothing through (not the line to the server, not notifications: the server log
+     * showed both), except an SMS to the phone's SMS app. So with «محافظي» as the SMS app, this SMS wakes it
+     * the moment it lands, and it fetches the request. Only a signal: anyone sending it only makes the phone
+     * look for requests, which open only with the account's key.
      */
-    fun bellPage(ctx: Context): String? {
-        val store = Store(ctx)
-        val id = store.getStr("sync_id") ?: return null
-        val word = Sync.randomWord()
-        val r = try { Sync.call("POST", "/api/s/$id/belltok", store, word.toByteArray(Charsets.US_ASCII)) } catch (_: Exception) { return null }
-        return if (r.first == 200) Sync.HOST + "/bell#" + id + "." + word else null
-    }
+    const val WAKE = "🔔 محافظي"
+    fun isWake(body: String?) = body != null && body.trim().let { it.startsWith(WAKE) || it.startsWith("محافظي: طلب تحويل") }
 
-    /** The doorbell rang (or something woke the app): fetch the requests now, and open the line again. */
+    /** The wake-up SMS came (or something woke the app): fetch the requests now, and open the line again. */
     fun ring(ctx: Context) {
         val app = ctx.applicationContext
         if (!enabled(Store(app))) return
         lastPoke = System.currentTimeMillis()
-        val wl = SmsSource.awake(app, "bell", 60_000L)
+        val wl = SmsSource.awake(app, "wake", 60_000L)
         Thread { try { fetch(app); keep(app) } catch (_: Exception) { } finally { try { if (wl.isHeld) wl.release() } catch (_: Exception) { } } }.start()
     }
 
@@ -242,71 +235,3 @@ class Beat : BroadcastReceiver() {
     }
 }
 
-/**
- * «شاشة البيت»: for the Android that stays at home on the charger. Infinix freezes «محافظي» whenever the
- * screen is off (the server log showed the doorbell heard only when the phone was opened, 68 seconds later),
- * but never the app on the screen. So this keeps the screen on at the lowest brightness, black, while the
- * phone charges: the line to the server stays open, a request from the iPhone runs within seconds, and
- * Vodafone's screen shows with no lock screen in the way. Off the charger it lets the screen sleep (and says
- * requests will wait). A long press leaves it. The words move every minute so nothing burns into the screen.
- */
-class StandbyActivity : android.app.Activity() {
-    private val h = android.os.Handler(android.os.Looper.getMainLooper())
-    private lateinit var text: android.widget.TextView
-    private val rnd = java.util.Random()
-    private val power = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { apply() } }
-    private val tick = Runnable { every() }
-
-    override fun onCreate(savedInstanceState: android.os.Bundle?) {
-        super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= 27) setShowWhenLocked(true)
-        else @Suppress("DEPRECATION") window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
-        window.attributes = window.attributes.apply { screenBrightness = 0.02f }
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-            android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        val root = android.widget.FrameLayout(this).apply { setBackgroundColor(0xFF000000.toInt()) }
-        text = android.widget.TextView(this).apply {
-            setTextColor(0xFF5F656B.toInt()); textSize = 15f; gravity = android.view.Gravity.CENTER; setLineSpacing(0f, 1.3f)
-        }
-        root.addView(text, android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.view.Gravity.CENTER))
-        root.setOnLongClickListener { finish(); true }
-        root.setOnClickListener { android.widget.Toast.makeText(this, "دوس مطوّل علشان تخرج من شاشة البيت", android.widget.Toast.LENGTH_SHORT).show() }
-        setContentView(root)
-        val f = android.content.IntentFilter(Intent.ACTION_POWER_CONNECTED).apply { addAction(Intent.ACTION_POWER_DISCONNECTED) }
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(power, f, Context.RECEIVER_NOT_EXPORTED) else registerReceiver(power, f)
-        WatchService.start(this)
-        Remote.keep(this)
-        try { Remote.ring(this) } catch (_: Exception) { }   // anything that waited while it was frozen
-        every()
-    }
-
-    private fun charging(): Boolean = try { getSystemService(android.os.BatteryManager::class.java).isCharging } catch (_: Exception) { true }
-
-    private fun apply() {
-        val on = charging()
-        if (on) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT, java.util.Locale("ar", "EG")).format(java.util.Date())
-        text.text = "💰 محافظي مستني تحويلات الآيفون\n" +
-            (if (on) "🔌 على الشاحن، الشاشة هتفضل منوّرة" else "⚠️ مش على الشاحن: الشاشة هتطفي، والطلبات هتستنى لحد ما تفتحه") + "\n" +
-            (if (Remote.state == "on") "✓ متصل" else "بيتصل…") + " · " + time + "\n" +
-            "دوس مطوّل علشان تخرج"
-    }
-
-    private fun every() {
-        apply()
-        Remote.keep(this)
-        // move the words a little, so nothing stays in one place on the screen
-        val w = window.decorView.width; val hh = window.decorView.height
-        if (w > 0 && hh > 0) { text.translationX = (rnd.nextFloat() - 0.5f) * w * 0.4f; text.translationY = (rnd.nextFloat() - 0.5f) * hh * 0.5f }
-        h.removeCallbacks(tick); h.postDelayed(tick, 60_000L)
-    }
-
-    override fun onDestroy() {
-        h.removeCallbacks(tick)
-        try { unregisterReceiver(power) } catch (_: Exception) { }
-        super.onDestroy()
-    }
-}
