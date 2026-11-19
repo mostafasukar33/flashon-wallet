@@ -127,6 +127,13 @@ html.view [data-act=settings],html.view [data-act=dl],html.view [data-act=rename
 .field input[type=tel]{border:1px solid var(--line2);border-radius:10px;min-height:48px;padding:0 12px;font-size:17px;background:#fff;width:100%}
 details.old{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 details.old summary{font-weight:700;font-size:15px;min-height:32px;cursor:pointer}
+.rcpt{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.rcpt .top{background:var(--blue);color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center}
+.rcpt .top b{font-size:17px}
+.rcpt .body{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.rcpt .amt{font-size:30px;font-weight:700;text-align:center;padding:4px 0 8px;border-bottom:1px dashed var(--line2)}
+.rcpt .row{font-size:14px}
+.rcpt .row span:first-child{color:var(--mute)}
 .linkbox{direction:ltr;text-align:left;font-size:13px;word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;color:var(--ink2)}
 </style>
 </head>
@@ -192,6 +199,8 @@ if (!B) {
     setXferCode:function(c){mock.xfer.code=c||mock.xfer.def;setTimeout(App.reload,100);return true},
     sendXfer:function(j){var o=JSON.parse(j);setTimeout(function(){mock.xfer.list.unshift({id:'m'+Date.now(),to:o.to,a:+o.a,from:'phone',w:o.w,st:'run',msg:'',at:Date.now(),up:Date.now()});App.onXferSent(true,'');App.reload()},300)},
     dialXfer:function(){toast('بيفتح الاتصال بالكود…')},
+    shareImage:function(u,n,t,save){toast(save?'اتحفظ في الصور ✓':'بيفتح المشاركة…')},
+    copyText:function(){toast('اتنسخ')},
     viewing:function(){},
     loadThreads:function(){setTimeout(function(){App.onThreads(JSON.stringify({unread:2,threads:[
       {id:'1',addr:'VF-Cash',name:null,snippet:'تم استلام مبلغ 7000 جنيه من رقم 01018064481 المسجل بإسم Mahmoud A Hemdan',time:Date.now()-60000,out:false,unread:1},
@@ -625,10 +634,105 @@ function xferRows(list){
     return '<div class="tx" style="align-items:flex-start"><div class="dot" style="background:#ECEDE9;color:'+st[2]+';font-weight:700">'+st[0]+'</div>'+
       '<div class="mid"><span class="who"><span class="num">'+fmt(x.a)+'</span> ج لـ <span class="num">'+esc(x.to)+'</span></span>'+
       '<span class="xs" style="color:'+st[2]+';font-weight:600">'+st[1]+xferLineOf(x.w)+(x.from==='iphone'?' · من الآيفون':'')+' · '+whenF(x.up||x.at)+'</span>'+
-      (x.msg?'<span class="xs mute" style="line-height:1.6;white-space:normal">'+esc(x.msg)+'</span>':'')+'</div></div>';
+      (x.sms?'<span class="xs" style="color:var(--in);font-weight:600">🧾 اتأكد برسالة فودافون'+(x.ref?' · رقم العملية <span class="num">'+esc(x.ref)+'</span>':'')+'</span>':
+        (x.st==='ok'||x.st==='unsure')&&Date.now()-(x.up||x.at)<15*60000?'<span class="xs mute">مستني رسالة فودافون…</span>':'')+
+      (x.msg&&!x.sms?'<span class="xs mute" style="line-height:1.6;white-space:normal">'+esc(x.msg)+'</span>':'')+
+      (x.sms&&txOf(x.sms)?'<button class="pill" style="align-self:flex-start;margin-top:4px" data-act="receipt" data-id="'+esc(x.sms)+'">🧾 الإيصال</button>':'')+'</div></div>';
   }).join('');
 }
 function xferLineOf(w){ var a=X().accounts||[], n=a.filter(function(x){return x.w===w})[0]; return a.length>1 && n && n.n ? ' · من خط '+esc(n.n) : ''; }
+function txOf(id){ return (D.txs||[]).filter(function(x){return x.id===id})[0]; }
+
+/* ---------- receipts: from Vodafone's own SMS, to send or keep ---------- */
+var RC={id:null, url:null, hide:true};
+function rcBody(t){
+  var b=t.body || (B.getBody ? B.getBody(t.id) : '') || '';
+  b=b.replace(/https?:\/\/\S+|www\.\S+/gi,'').replace(/[ \t]+/g,' ').replace(/\n\s*\n+/g,'\n').trim();
+  if (RC.hide && t.balance!=null) b=b.replace(/[0-9٠-٩][0-9٠-٩,.٬٫]*/g, function(m){ var v=parseFloat(digits(m).replace(/[,٬]/g,'').replace('٫','.')); return Math.abs(v-t.balance)<0.006 ? '••••' : m; });
+  return b;
+}
+function rcRows(t){
+  var isIn=t.type==='in', n=nowOf(t.w), d=new Date(t.time), rows=[];
+  if (t.phone) rows.push([isIn?'من':'لـ', (t.name&&t.name!==t.phone?t.name+' · ':'')+t.phone]);
+  rows.push([isIn?'على':'من', accLabel(t.w)+(n&&n.own?' · '+n.own:'')]);
+  if (t.fee>0) rows.push(['الرسوم', fmt(t.fee)+' ج']);
+  if (!RC.hide && t.balance!=null) rows.push(['الرصيد بعدها', fmt2(t.balance)+' ج']);
+  rows.push(['الوقت', dayF.format(d)+' · '+timeF.format(d)]);
+  if (t.ref) rows.push(['رقم العملية', t.ref]);
+  return rows;
+}
+function rcTitle(t){ return t.type==='in'?'إيصال استلام':'إيصال '+(t.kind||'تحويل'); }
+function receiptSheet(id){
+  var t=txOf(id); if(!t){ toast('رسالة فودافون لسه موصلتش'); return; }
+  if (RC.id!==id) { RC.id=id; RC.url=null; }
+  var h='<div class="rcpt"><div class="top"><b>'+esc(rcTitle(t))+'</b><span class="small">محافظي</span></div><div class="body">'+
+    '<div class="amt num '+(t.type==='in'?'in':'out')+'">'+fmt2(t.amount)+' ج</div>'+
+    rcRows(t).map(function(r){ return '<div class="row"><span>'+esc(r[0])+'</span><span style="text-align:left">'+esc(r[1])+'</span></div>'; }).join('')+
+    '<span class="xs mute" style="margin-top:4px">رسالة فودافون كاش زي ما وصلت:</span><div class="msg">'+esc(rcBody(t))+'</div></div></div>'+
+    '<label class="switch"><span style="font-size:15px">اخفي رصيدي من الإيصال</span><input type="checkbox" id="rc_hide"'+(RC.hide?' checked':'')+'></label>'+
+    '<div class="grid2"><button class="btn main" data-act="rcshare" id="rcshare"'+(VIEW?' disabled':'')+'>'+(VIEW?'بيجهز…':'ابعته صورة')+'</button>'+
+    (VIEW?'<button class="btn ghost" data-act="rccopy">انسخ النص</button>':'<button class="btn ghost" data-act="rcsave">احفظه في الصور</button>')+'</div>'+
+    (VIEW?'':'<button class="btn ghost" data-act="rccopy">انسخ نص الرسالة</button>');
+  openSheet(h);
+  // the picture is ready before the tap (the iPhone shares only straight from a tap)
+  receiptImage(t).then(function(u){ if (RC.id!==id) return; RC.url=u; var b=document.getElementById('rcshare'); if (b) { b.disabled=false; b.textContent=VIEW?'ابعته أو احفظه':'ابعته صورة'; } })
+    .catch(function(){ var b=document.getElementById('rcshare'); if (b) b.textContent='مقدرتش أعمل الصورة'; });
+}
+function rcText(t){ return rcTitle(t)+'\n'+fmt2(t.amount)+' ج\n'+rcRows(t).map(function(r){return r[0]+': '+r[1]}).join('\n')+'\n\n'+rcBody(t); }
+function wrapLines(x, text, maxW){
+  var out=[]; String(text).split('\n').forEach(function(par){
+    var line=''; par.split(' ').forEach(function(w){ var tr=line?line+' '+w:w; if (x.measureText(tr).width>maxW && line) { out.push(line); line=w; } else line=tr; });
+    out.push(line);
+  }); return out;
+}
+/* the receipt as a picture, drawn here (same font as the app) */
+function receiptImage(t){
+  var load = document.fonts && document.fonts.load ? Promise.all(['400','600','700'].map(function(w){ return document.fonts.load(w+' 40px Plex'); })) : Promise.resolve();
+  return load.catch(function(){}).then(function(){
+    var W=1080, P=64, F='Plex, sans-serif', rows=rcRows(t), body=rcBody(t), isIn=t.type==='in';
+    var c=document.createElement('canvas'), x=c.getContext('2d');
+    x.font='400 34px '+F; var lines=wrapLines(x, body, W-2*P-56);
+    var rowH=84, H=170+190+rows.length*rowH+70+lines.length*54+90+110;
+    c.width=W; c.height=H; x=c.getContext('2d'); x.direction='rtl'; x.textBaseline='middle';
+    x.fillStyle='#F4F5F2'; x.fillRect(0,0,W,H);
+    x.fillStyle='#1E5AA8'; x.fillRect(0,0,W,170);
+    x.fillStyle='#fff'; x.textAlign='right'; x.font='700 52px '+F; x.fillText(rcTitle(t), W-P, 86);
+    x.textAlign='left'; x.font='600 36px '+F; x.fillStyle='#D6E3F5'; x.fillText('محافظي', P, 86);
+    var y=170;
+    x.fillStyle=isIn?'#0B6B3F':'#A33A1E'; x.textAlign='center'; x.direction='rtl'; x.font='700 96px '+F; x.fillText(fmt2(t.amount)+' ج', W/2, y+100);
+    x.strokeStyle='#D9DBD5'; x.setLineDash([12,10]); x.lineWidth=3; x.beginPath(); x.moveTo(P,y+180); x.lineTo(W-P,y+180); x.stroke(); x.setLineDash([]);
+    y+=190;
+    rows.forEach(function(r){
+      x.direction='rtl'; x.textAlign='right'; x.font='400 34px '+F; x.fillStyle='#555A60'; x.fillText(r[0], W-P, y+rowH/2);
+      var v=r[1], latin=/^[0-9+ .,:\-]+$/.test(v); x.direction=latin?'ltr':'rtl'; x.textAlign='left'; x.font='600 36px '+F; x.fillStyle='#16181B';
+      var maxV=W-2*P-260; while (x.measureText(v).width>maxV && v.length>4) v=v.slice(0,-2);
+      x.fillText(v, P, y+rowH/2);
+      x.strokeStyle='#E3E5DF'; x.lineWidth=2; x.beginPath(); x.moveTo(P,y+rowH); x.lineTo(W-P,y+rowH); x.stroke();
+      y+=rowH;
+    });
+    y+=40; x.direction='rtl'; x.textAlign='right'; x.font='600 30px '+F; x.fillStyle='#555A60'; x.fillText('رسالة فودافون كاش زي ما وصلت', W-P, y);
+    y+=30; var bh=lines.length*54+50;
+    x.fillStyle='#fff'; x.strokeStyle='#E3E5DF'; x.lineWidth=2; x.beginPath(); if (x.roundRect) x.roundRect(P,y,W-2*P,bh,24); else x.rect(P,y,W-2*P,bh); x.fill(); x.stroke();
+    x.fillStyle='#33373C'; x.font='400 34px '+F;
+    lines.forEach(function(l,i){ x.fillText(l, W-P-28, y+50+i*54); });
+    y+=bh+60; x.textAlign='center'; x.font='400 26px '+F; x.fillStyle='#8A8F95';
+    x.fillText('من رسالة فودافون كاش الأصلية · محافظي', W/2, y);
+    return c.toDataURL('image/png');
+  });
+}
+function rcFile(){
+  var b=atob(RC.url.split(',')[1]), u=new Uint8Array(b.length); for (var i=0;i<b.length;i++) u[i]=b.charCodeAt(i);
+  var t=txOf(RC.id); return new File([u], 'إيصال-'+((t&&t.ref)||Date.now())+'.png', {type:'image/png'});
+}
+function rcShare(){
+  var t=txOf(RC.id); if (!t || !RC.url) return;
+  if (!VIEW) { B.shareImage(RC.url, 'إيصال-'+(t.ref||t.id), rcText(t), false); return; }
+  var f=rcFile();
+  if (navigator.canShare && navigator.canShare({files:[f]})) { navigator.share({files:[f], title:rcTitle(t)}).catch(function(){}); return; }
+  // no share sheet: the picture on its own, to hold and save
+  openSheet('<h2>'+esc(rcTitle(t))+'</h2><img src="'+RC.url+'" alt="'+esc(rcTitle(t))+'" style="width:100%;border-radius:12px;border:1px solid var(--line)"><span class="small mute">دوس مطوّل على الصورة واختار «حفظ الصورة» أو «مشاركة».</span>');
+}
+
 function xferRecent(){
   if (!xferCan()) return '';
   var now=Date.now(), list=(X().list||[]).filter(function(x){return now-(x.up||x.at)<3*86400000}).slice(0,4);
@@ -881,6 +985,7 @@ function txSheet(id){
     (t.fee>0?'<div class="row"><span class="mute">رسوم</span><span class="num">'+fmt(t.fee)+'</span></div>':'')+
     (t.balance!=null?'<div class="row"><span class="mute">الرصيد بعدها</span><span class="num">'+fmt2(t.balance)+'</span></div>':'')+
     '</div><div class="msg">'+esc(t.body || (B.getBody ? B.getBody(t.id) : ''))+'</div>';
+  h+='<button class="btn ghost" data-act="receipt" data-id="'+esc(t.id)+'">🧾 إيصال '+(isIn?'الاستلام':'التحويل')+' (صورة أو نص)</button>';
   if (t.phone) h+='<button class="btn ghost" data-act="person" data-p="'+esc(t.phone)+'">كل عمليات '+esc(t.name)+'</button>';
   if (!VIEW) h+='<span class="small mute">النوع غلط؟ صححه:</span><div class="btn3"><button class="b-in" data-act="settype" data-id="'+esc(t.id)+'" data-t="in">وارد</button><button class="b-out" data-act="settype" data-id="'+esc(t.id)+'" data-t="out">صادر</button><button class="b-no" data-act="settype" data-id="'+esc(t.id)+'" data-t="ignore">مش عملية</button></div>';
   openSheet(h);
@@ -929,6 +1034,13 @@ document.addEventListener('click', function(e){
       var pre=el.dataset.w || (S.screen==='home' && S.filter!=='all' ? S.filter : '');
       if (!(X().accounts||[]).some(function(n){return n.w===pre})) pre=S.xf&&S.xf.w;
       S.xf=pre?{w:pre}:null; xferSheet(); break;
+    case 'receipt': closeSheet(); setTimeout(function(){ receiptSheet(el.dataset.id); }, 50); break;
+    case 'rcshare': rcShare(); break;
+    case 'rcsave': var tt=txOf(RC.id); if (tt && RC.url) B.shareImage(RC.url, 'إيصال-'+(tt.ref||tt.id), '', true); break;
+    case 'rccopy': var tc=txOf(RC.id); if (!tc) break;
+      if (!VIEW && B.copyText) B.copyText(rcText(tc));
+      else if (navigator.clipboard) navigator.clipboard.writeText(rcText(tc)).then(function(){toast('اتنسخ')}, function(){toast('مقدرتش أنسخ')});
+      break;
     case 'xacc': xferRead(); S.xf.w=el.dataset.w; xferSheet(); break;
     case 'xnext':
       var xf=xferRead(), bad=xferCheck(xf);
@@ -1019,7 +1131,7 @@ function watchCards(){
     obs.observe(w);
   }
 }
-document.addEventListener('change', function(e){ if(e.target.id==='month'){ S.month=e.target.value; render(); } if(e.target.id==='s_xrm'){ if (B.setXferRemote) B.setXferRemote(e.target.checked); toast(e.target.checked?'التحويل من الآيفون اشتغل':'التحويل من الآيفون اتقفل'); } if(e.target.id==='s_txn'){ B.setTxNotify(e.target.checked); toast(e.target.checked?'هيجيلك إشعار مع كل عملية':'الإشعارات دي اتقفلت'); } });
+document.addEventListener('change', function(e){ if(e.target.id==='month'){ S.month=e.target.value; render(); } if(e.target.id==='rc_hide'){ RC.hide=e.target.checked; RC.url=null; receiptSheet(RC.id); return; } if(e.target.id==='s_xrm'){ if (B.setXferRemote) B.setXferRemote(e.target.checked); toast(e.target.checked?'التحويل من الآيفون اشتغل':'التحويل من الآيفون اتقفل'); } if(e.target.id==='s_txn'){ B.setTxNotify(e.target.checked); toast(e.target.checked?'هيجيلك إشعار مع كل عملية':'الإشعارات دي اتقفلت'); } });
 var qT;
 document.addEventListener('input', function(e){
   if(e.target.id==='smsText'){ S.draft=e.target.value; grow(e.target); return; }

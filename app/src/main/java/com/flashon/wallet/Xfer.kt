@@ -29,6 +29,8 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.TextView
+import com.flashon.wallet.core.Parser
+import com.flashon.wallet.core.RawSms
 import com.flashon.wallet.core.Ussd
 import com.flashon.wallet.core.Wallet
 import org.json.JSONArray
@@ -132,6 +134,33 @@ object Xfer {
         out.put(o)
         for (i in 0 until old.length()) { val x = old.getJSONObject(i); if (x.optString("id") != id && out.length() < KEEP) out.put(x) }
         store.putStr("xfers", out.toString())
+    }
+
+    // ---------- the proof: Vodafone's SMS for it ----------
+
+    /**
+     * A new Vodafone Cash SMS that is a transfer this app made (same amount, same number, a few minutes after):
+     * linked to it, so the list says "confirmed by Vodafone's SMS" and the receipt opens from it. The iPhone gets
+     * the SMS text itself as the notification, in place of the earlier "✓" one (same tag).
+     */
+    fun matchSms(ctx: Context, store: Store, fresh: List<RawSms>) {
+        if (history(store).length() == 0) return
+        for (raw in fresh) {
+            val p = Parser.parse(raw) ?: continue
+            val list = history(store)
+            for (i in 0 until list.length()) {
+                val x = list.getJSONObject(i)
+                if (x.has("sms") || !Ussd.proves(p, x.optString("to"), x.optDouble("a", -1.0), x.optLong("at"))) continue
+                val a = p.amount ?: continue
+                val to = x.optString("to")
+                record(store, x.optString("id"), JSONObject().put("sms", raw.id).put("st", "ok").put("ref", p.txId ?: ""))
+                if (x.optString("from") == "iphone" && Sync.isOn(store)) {
+                    val text = raw.body.replace(Regex("https?://\\S+"), "").replace(Regex("[ \\t]+"), " ").trim().take(700)
+                    try { Sync.notify(ctx, store, listOf(Notifier.Msg("🧾 اتحوّل ${Notifier.fmt(a)} ج لـ $to", text, "x" + x.optString("id")))) } catch (_: Exception) { }
+                }
+                break
+            }
+        }
     }
 
     // ---------- starting one ----------
@@ -379,9 +408,13 @@ object Xfer {
         }
         Thread {
             val store = Store(app)
-            record(store, j.id, JSONObject().put("st", st).put("msg", msg))
-            note(app, title, msg, false)
-            if (j.from == "iphone") tellIphone(app, store, title, msg, j.id)
+            // Vodafone's SMS already came for it: it went through, whatever the last screen said
+            val h = history(store)
+            val proven = (0 until h.length()).any { h.getJSONObject(it).let { o -> o.optString("id") == j.id && o.has("sms") } }
+            record(store, j.id, JSONObject().put("st", if (proven) "ok" else st).put("msg", msg))
+            note(app, if (proven) "✓ اتحوّل $amt ج لـ ${j.to}" else title, msg, false)
+            // the iPhone already has Vodafone's SMS text for it (matchSms): no second notification over it
+            if (j.from == "iphone" && !proven) tellIphone(app, store, title, msg, j.id)
             refresh(app)
         }.start()
     }

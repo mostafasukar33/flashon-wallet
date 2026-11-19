@@ -236,11 +236,26 @@ function wsOpen(port, path, tok) {
     eq('الآيفون بيعرض إنه اتبعت', (await pg.innerText('body')).includes('اتبعت للأندرويد'), true);
     eq('الرقم السري مش محفوظ على الآيفون', await pg.evaluate(() => JSON.stringify(localStorage).includes('654321')), false);
     // الأندرويد خلّص ورفع النتيجة
-    const done = sample(8713.7); done.data.xfer.list = [{id: c2.id, to: '01012345678', a: 750, from: 'iphone', w: 'vfs5', st: 'ok', msg: 'تم تحويل 750 جنيه بنجاح', at: Date.now(), up: Date.now()}];
+    const done = sample(8713.7); done.data.xfer.list = [{id: c2.id, to: '01012345678', a: 750, from: 'iphone', w: 'vfs5', st: 'ok', msg: 'تم تحويل 750 جنيه بنجاح', at: Date.now(), up: Date.now(), sms: 'a2', ref: '0288885599000'}];
+    done.data.txs.unshift({id: 'a2', w: 'vf', p: 'vf', type: 'out', kind: 'تحويل', amount: 750, fee: 1, balance: 7962.7, phone: '01012345678', name: '01012345678', smsName: null, time: Date.now(), how: 'words', ref: '0288885599000'});
+    done.data.bodies.a2 = 'تم تحويل 750 جنيه لرقم 01012345678 مصاريف الخدمة 1 جنيه رصيد حسابك فى فودافون كاش الحالي 7962.70 رقم العملية: 0288885599000';
     await fetch(S, {method: 'PUT', headers: phone(), body: seal(L.key, 1, zlib.gzipSync(Buffer.from(JSON.stringify(done))))});
     await pg.evaluate(() => App.reload());
     await pg.waitForFunction(() => document.body.innerText.includes('اتحوّل'), null, {timeout: 8000}).catch(() => {});
     eq('الآيفون بيعرض إن التحويل تم', (await pg.innerText('body')).includes('اتحوّل'), true);
+    // الإيصال: من رسالة فودافون نفسها، والرصيد مستخبي
+    eq('بيقول إن رسالة فودافون أكدته', (await pg.innerText('body')).includes('اتأكد برسالة فودافون'), true);
+    await pg.click('#list ~ * [data-act=receipt], [data-act=receipt]'); await pg.waitForTimeout(500);
+    const rc = await pg.innerText('#sheet');
+    eq('الإيصال فيه المبلغ ورقم العملية', rc.includes('750.00') && rc.includes('0288885599000'), true);
+    eq('… والرصيد مستخبي', rc.includes('7962') || rc.includes('7,962'), false);
+    await pg.waitForFunction(() => { const b = document.getElementById('rcshare'); return b && !b.disabled; }, null, {timeout: 8000}).catch(() => {});
+    eq('صورة الإيصال جاهزة', await pg.evaluate(() => !document.getElementById('rcshare').disabled), true);
+    await pg.screenshot({path: (process.env.SHOT || '/tmp/wallet') + '-receipt.png'});
+    await pg.click('#rcshare'); await pg.waitForTimeout(500);
+    const src = await pg.getAttribute('#sheet img', 'src').catch(() => null);
+    eq('من غير زرار مشاركة: الصورة نفسها تتحفظ بالضغط عليها', !!src && src.startsWith('data:image/png;base64,') && src.length > 20000, true);
+    await pg.evaluate(() => document.getElementById('sheetBg').click());
     await fetch(C + '?upto=999', {method: 'DELETE', headers: phone()});
     ws2.close();
     // تحديث من الموبايل بيوصل لوحده

@@ -80,7 +80,7 @@ class ExportProvider : ContentProvider() {
     }
 
     override fun onCreate() = true
-    override fun getType(uri: Uri) = "text/csv"
+    override fun getType(uri: Uri) = if (uri.lastPathSegment?.endsWith(".png") == true) "image/png" else "text/csv"
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         if (mode != "r") return null

@@ -115,5 +115,5 @@ object DataJson {
         .put("amount", d(p.amount)).put("fee", p.fee).put("balance", d(p.balance))
         .put("phone", p.phone ?: JSONObject.NULL).put("name", led.displayName(p) ?: JSONObject.NULL)
         .put("smsName", p.smsName ?: JSONObject.NULL).put("time", p.sms.time)
-        .put("how", p.how).apply { if (withBody) put("body", p.sms.body) }
+        .put("how", p.how).put("ref", p.txId ?: JSONObject.NULL).apply { if (withBody) put("body", p.sms.body) }
 }

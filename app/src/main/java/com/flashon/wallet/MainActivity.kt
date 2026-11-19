@@ -253,6 +253,21 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Pictures/محافظي in the phone's photos (Android 10+ needs no permission for its own pictures). */
+    private fun saveToPhotos(bytes: ByteArray, name: String): Boolean {
+        if (Build.VERSION.SDK_INT < 29) return false
+        val v = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
+            put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/محافظي")
+            put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v) ?: return false
+        contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return false
+        contentResolver.update(uri, android.content.ContentValues().apply { put(android.provider.MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+        return true
+    }
+
     private fun openAppInfoNow() {
         try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: Exception) { }
     }
@@ -482,6 +497,44 @@ class MainActivity : Activity() {
          *  notification access or «التحويل التلقائي» for an app installed from outside the store. */
         @JavascriptInterface
         fun openAppInfo() { main.post { openAppInfoNow() } }
+
+        // ---------- receipts ----------
+
+        /**
+         * A receipt picture drawn by the screen (data:image/png;base64,…): [save] = into the phone's photos
+         * (Pictures/محافظي), else the share list (WhatsApp, …) with [text] along.
+         */
+        @JavascriptInterface
+        fun shareImage(dataUrl: String, name: String, text: String, save: Boolean) {
+            Thread {
+                val bytes = try { android.util.Base64.decode(dataUrl.substringAfter(','), android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+                val file = name.replace(Regex("[^\\p{L}\\p{N}_-]"), "-").take(60).ifBlank { "receipt" } + ".png"
+                if (bytes == null || bytes.size < 100) { main.post { Toast.makeText(this@MainActivity, "مقدرتش أعمل الصورة", Toast.LENGTH_SHORT).show() }; return@Thread }
+                if (save) {
+                    val ok = try { saveToPhotos(bytes, file) } catch (_: Exception) { false }
+                    main.post { Toast.makeText(this@MainActivity, if (ok) "اتحفظ في الصور ✓" else "مقدرتش أحفظه، ابعته لنفسك بدل كده", Toast.LENGTH_SHORT).show() }
+                    return@Thread
+                }
+                try {
+                    val dir = java.io.File(cacheDir, "export").apply { mkdirs() }
+                    dir.listFiles()?.filter { it.name.endsWith(".png") }?.forEach { it.delete() }
+                    java.io.File(dir, file).writeBytes(bytes)
+                    val uri = Uri.parse("content://${Export.AUTH}/" + Uri.encode(file))
+                    val send = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, uri)
+                        .apply { if (text.isNotBlank()) putExtra(Intent.EXTRA_TEXT, text) }
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    main.post { try { startActivity(Intent.createChooser(send, "ابعت الإيصال").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) } catch (_: Exception) { } }
+                } catch (_: Exception) { }
+            }.start()
+        }
+
+        @JavascriptInterface
+        fun copyText(text: String) {
+            main.post {
+                getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("محافظي", text))
+                Toast.makeText(this@MainActivity, "اتنسخ", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         // ---------- notification access (the fix that keeps the phone's SMS app) ----------
 

@@ -102,6 +102,7 @@ object SmsSource {
             val msgs = Notifier.announce(ctx, store, fresh.map { it.id })
             val tags = sent.map { it.tag }.toHashSet()
             Sync.notify(ctx, store, msgs.filter { it.tag !in tags })
+            try { Xfer.matchSms(ctx, store, fresh) } catch (_: Exception) { }   // the proof of a transfer made from the app
             Notifier.check(ctx, store)
         }
         MainActivity.refreshIfOpen()

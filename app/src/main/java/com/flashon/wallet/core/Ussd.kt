@@ -41,6 +41,20 @@ object Ussd {
 
     fun pinOk(p: String?) = p != null && Regex("^[0-9]{4,8}$").matches(p)
 
+    /**
+     * Is this Vodafone Cash SMS the proof of a transfer of [amount] to [to] started at [startedAt]: money out
+     * (or not understood yet), the same amount, the same number, from a minute before to 20 minutes after.
+     */
+    fun proves(p: Parsed, to: String, amount: Double, startedAt: Long): Boolean {
+        if (p.wallet != Wallet.VODAFONE || p.type == TxType.IN || p.type == TxType.IGNORE) return false
+        val a = p.amount ?: return false
+        if (to.length < 10 || Math.abs(a - amount) > 0.011) return false
+        val digits = Parser.normalize(p.sms.body).replace(Regex("(?<=\\d)[\\s-]+(?=\\d)"), "")
+        if (!(p.phone?.endsWith(to.takeLast(9)) == true || digits.contains(to.takeLast(9)))) return false
+        val age = p.sms.time - startedAt
+        return age >= -60_000L && age <= 20 * 60_000L
+    }
+
     enum class Step {
         /** "Running USSD code…" or nothing yet: wait for the next screen. */
         WAIT,
