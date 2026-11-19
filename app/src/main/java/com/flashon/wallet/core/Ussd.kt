@@ -90,6 +90,50 @@ object Ussd {
     /** The phone or the network failed to carry the code ("حدثت مشكلة في الاتصال أو رمز MMI غير صالح"): Vodafone never saw it. */
     fun glitch(text: String): Boolean = GLITCH.containsMatchIn(clean(text))
 
+    // ---------- the transfer with no screen (one code, the answers joined with "*") ----------
+
+    /** Where the codes without the PIN got to. */
+    sealed class Probe {
+        /** The next thing Vodafone expects is the PIN: send [keys] then the PIN. [before] = the pages read on the way. */
+        class Pin(val keys: String, val before: String) : Probe()
+        /** Can't be done with no screen ([off] = not on this phone for now). Nothing was typed: do it the usual way. */
+        class No(val why: String, val off: Boolean) : Probe()
+    }
+
+    /**
+     * Finds the keys that bring Vodafone to the PIN question, with codes that carry no PIN: [base] ("*9*7*N*A"),
+     * then base*0, base*0*0… while the answer is a page with "0:مزيد". [ask] sends one code with no screen and
+     * returns (true, Vodafone's text), (false, why) or null for no answer.
+     */
+    fun probe(base: String, ask: (String) -> Pair<Boolean, String>?, log: (String) -> Unit): Probe {
+        var keys = ""
+        var last = ""
+        val before = StringBuilder()
+        for (step in 0..4) {
+            val r = ask("$base$keys#") ?: return Probe.No("مفيش رد من غير شاشة", false)
+            if (!r.first) return Probe.No("الكود من غير شاشة مش متاح (${r.second})", step == 0)
+            log("فودافون (من غير شاشة): " + r.second)
+            if (r.second == last) return Probe.No("فودافون مبتقبلش الردود في نفس الكود", true)
+            last = r.second
+            if (asksPin(r.second)) return Probe.Pin(keys, before.toString())
+            val more = moreKey(r.second) ?: return Probe.No("فودافون سألت حاجة تانية غير الرقم السري", false)
+            before.append(r.second).append('\n')
+            keys += "*$more"
+        }
+        return Probe.No("صفحات كتير", false)
+    }
+
+    /** Vodafone's answer to the code with the PIN: "ok", "fail", "stop" (asked to confirm), or "unsure". */
+    fun verdict(res: String, to: String, before: String): String = when {
+        step(res, true, to, true, false, before) == Step.OK -> "ok"
+        asksPin(res) -> "fail"        // the PIN again: it was wrong
+        asks(res) -> "stop"           // a confirmation after the PIN
+        else -> when (step(res, false, to, true, false)) { Step.OK -> "ok"; Step.FAIL -> "fail"; else -> "unsure" }
+    }
+
+    /** Does this text ask for the PIN (the next thing to type is the PIN). */
+    fun asksPin(text: String): Boolean = PIN.containsMatchIn(clean(text))
+
     /** Does this text ask something (the PIN, or to confirm): a question, even when it comes as a notification. */
     fun asks(text: String): Boolean { val t = clean(text); return PIN.containsMatchIn(t) || CONFIRM.containsMatchIn(t) }
 

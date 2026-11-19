@@ -134,7 +134,11 @@ details.old summary{font-weight:700;font-size:15px;min-height:32px;cursor:pointe
 .rcpt .amt{font-size:30px;font-weight:700;text-align:center;padding:4px 0 8px;border-bottom:1px dashed var(--line2)}
 .rcpt .row{font-size:14px}
 .rcpt .row span:first-child{color:var(--mute)}
-.pinbox{-webkit-text-security:disc;text-security:disc;letter-spacing:4px}
+.pindots{display:flex;gap:12px;justify-content:center;direction:ltr;padding:8px 0}
+.pindots i{width:14px;height:14px;border-radius:50%;border:2px solid var(--line2);display:block}
+.pindots i.on{background:var(--ink);border-color:var(--ink)}
+.pinpad{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;direction:ltr}
+.pinpad button{min-height:52px;border:1px solid var(--line2);border-radius:12px;background:#fff;font-size:22px;font-weight:600;color:var(--ink)}
 .ltabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:8px}
 .ltab{position:relative;border:1px solid var(--line2);background:#fff;border-radius:14px;padding:12px 14px;min-height:72px;display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:right;width:100%}
 .ltab b{font-size:17px}
@@ -259,7 +263,7 @@ function back(){
   if (document.getElementById('sheet').classList.contains('open')) { closeSheet(); return true; }
   var p=S.stack.pop(); if(!p) return false;
   S.screen=p.screen; S.wallet=p.wallet; S.phone=p.phone; render(); window.scrollTo(0,p.scroll||0);
-  if (S.screen==='sms' && B.loadThreads) B.loadThreads();
+  if (S.screen==='sms') loadThreads();
   return true;
 }
 
@@ -577,7 +581,7 @@ function bgState(){
   }
   return '<span class="small mute" style="line-height:1.7">التطبيق شغال ومستني التحويلات (علشان كده فيه سطر «💰 محافظي شغال» ثابت فوق). وبيراقب نفسه: لو الموبايل جمّده وهو مقفول هيظهرلك تنبيه أحمر على طول.</span>'+ALARM+bgBtns();
 }
-function smsOn(){ return !VIEW && !!(D && D.smsApp && D.smsApp.on); }
+function smsOn(){ return VIEW ? !!(D && D.sms && D.sms.msgs && D.sms.msgs.length) : !!(D && D.smsApp && D.smsApp.on); }
 function smsCan(){ return !VIEW && !!(D && D.smsApp && D.smsApp.can && !D.smsApp.on); }
 function smsOnBox(more){
   return '<div class="alert good"><b>✓ «محافظي» هو تطبيق الرسايل</b><span style="line-height:1.7">أندرويد بيدّي أي رسالة لتطبيق الرسايل الأول علشان يحفظها، والموبايل مبيقدرش يمنعها عنه حتى لو جمّده. فالتحويل بيروح الآيفون أول ما الرسالة توصل، والتحويل من الآيفون بيصحّي الموبايل برسالة.</span></div>'+
@@ -820,7 +824,9 @@ function xferSheet(){
   h+='<div class="field"><label for="xf_to">الرقم</label><input type="tel" id="xf_to" class="num" name="vf-to" dir="ltr" style="text-align:left" placeholder="01xxxxxxxxx" autocomplete="off" data-lpignore="true" value="'+esc(f.to||'')+'"></div>'+
     '<div class="field"><label for="xf_a">المبلغ (جنيه)</label><input type="number" id="xf_a" class="num" inputmode="numeric" style="text-align:right" value="'+esc(f.a||'')+'"></div>'+
     (acc.can!=null?'<span class="xs mute">تقدر تحوّل دلوقتي <span class="num">'+fmt(acc.can)+'</span> ج من '+esc(acc.label)+'</span>':'')+
-    '<div class="field"><label for="xf_pin">الرقم السري بتاع فودافون كاش</label><input type="text" id="xf_pin" class="pinbox" name="vf-wallet-code" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" dir="ltr" style="text-align:left;border:1px solid var(--line2);border-radius:10px;min-height:48px;padding:0 12px;font-size:17px;background:#fff" value="'+esc(f.pin||'')+'"></div>'+
+    '<div class="field"><label>الرقم السري بتاع فودافون كاش</label><div class="pindots" id="xf_dots">'+pinDots()+'</div>'+
+      '<div class="pinpad">'+['1','2','3','4','5','6','7','8','9','','0','del'].map(function(k){
+        return k===''?'<span></span>':k==='del'?'<button type="button" data-act="pindel" aria-label="امسح رقم">⌫</button>':'<button type="button" data-act="pin" data-d="'+k+'">'+k+'</button>'; }).join('')+'</div></div>'+
     '<span class="xs mute" style="line-height:1.6">الرقم السري بيتكتب في شاشة فودافون على الأندرويد مرة واحدة ومبيتحفظش في أي حتة'+(VIEW?'، وبيتقفل بباسورد اللينك قبل ما يطلع من الآيفون':'')+'.</span>'+
     '<button class="btn main" data-act="xnext">كمّل</button>'+
     (!VIEW&&!x.ready?'<button class="btn ghost" data-act="xdial">أو اطلب الكود واكتب الرقم السري بنفسك</button>':'');
@@ -838,10 +844,14 @@ function xferPick(accs, acc){
       (n.can!=null?'<span class="can">يحوّل دلوقتي '+fmt(n.can)+'</span>':'')+'</button>';
   }).join('')+'</div></div>';
 }
+/* the PIN, typed on our own number pad: kept here only until it's sent */
+var PIN='';
+function pinDots(){ var n=Math.max(6,PIN.length), h=''; for (var i=0;i<n;i++) h+='<i'+(i<PIN.length?' class="on"':'')+'></i>'; return h; }
+function pinShow(){ var d=document.getElementById('xf_dots'); if (d) d.innerHTML=pinDots(); }
 function xferRead(){
   var g=function(id){var e=document.getElementById(id); return e?e.value.trim():'';};
   var acc=xferAcc(), w=acc&&acc.w;
-  S.xf={w:w, to:g('xf_to'), a:g('xf_a'), pin:digits(g('xf_pin'))};
+  S.xf={w:w, to:g('xf_to'), a:g('xf_a'), pin:PIN};
   return S.xf;
 }
 function xferCheck(f){
@@ -905,7 +915,7 @@ function avatar(n){ var c=String(n||'').trim().charAt(0); return (!c||/[0-9+]/.t
 function whenF(t){ var d=new Date(t); return dayKey(t)===dayKey(Date.now())?timeF.format(d):shortF.format(d); }
 /* SIM lines for the messages: "خط 1" with its number, unread count, in the phone's order */
 function smsLines(){
-  var ls=(SMS.lines&&SMS.lines.length?SMS.lines:(D&&D.smsApp&&D.smsApp.lines)||[]), pl=(D&&D.phoneLines)||[];
+  var ls=VIEW?((D&&D.sms&&D.sms.lines)||[]):(SMS.lines&&SMS.lines.length?SMS.lines:(D&&D.smsApp&&D.smsApp.lines)||[]), pl=(D&&D.phoneLines)||[];
   return ls.map(function(l,i){ var m=pl.filter(function(x){return x.key==='s'+l.sub})[0];
     return {sub:l.sub, unread:l.unread||0, n:m?m.n:String(i+1), own:m&&m.own&&m.own[0]?m.own[0]:''}; });
 }
@@ -919,7 +929,7 @@ function smsTabs(act){
   }).join('')+'</div>';
 }
 function smsHomeCard(){
-  var ls=smsLines(), un=(D.smsApp&&D.smsApp.unread)||0;
+  var ls=smsLines(), un=VIEW?ls.reduce(function(a,l){return a+(l.unread||0)},0):((D.smsApp&&D.smsApp.unread)||0);
   return '<div class="card col" style="gap:10px"><div class="row"><h2>💬 الرسايل</h2>'+
     (ls.length<2?'<button class="pill" data-act="sms">'+(un?un+' جديدة · ':'')+'افتح</button>':(un?'<span class="xs" style="color:var(--blue);font-weight:700">'+un+' جديدة</span>':''))+'</div>'+
     smsTabs('smsline')+'</div>';
@@ -929,7 +939,24 @@ function smsPickTab(){
   if (ls.some(function(l){return l.sub===S.smsSub})) return;
   var u=ls.filter(function(l){return l.unread})[0]; S.smsSub=(u||ls[0]).sub;
 }
+/* on the iPhone: conversations and messages from what the Android uploaded (one per conversation and line, like SmsApp.threads) */
+function viewThreads(){
+  var m=(D.sms&&D.sms.msgs)||[], subs=((D.sms&&D.sms.lines)||[]).map(function(l){return l.sub}), seen={}, out=[];
+  m.forEach(function(r){ var sub=subs.indexOf(r[6])>=0?r[6]:(subs[0]!=null?subs[0]:-1), k=r[0]+'/'+sub, t=seen[k];
+    if (!t) { t=seen[k]={id:String(r[0]),addr:r[1],name:r[2]||null,snippet:String(r[3]||'').replace(/\n/g,' ').slice(0,140),time:r[4],out:!!r[5],unread:0,sub:sub}; out.push(t); }
+    if (!r[5] && !r[7]) t.unread++; });
+  return out;
+}
+function viewChat(id){
+  var m=((D.sms&&D.sms.msgs)||[]).filter(function(r){return String(r[0])===String(id)}).slice().reverse();
+  var f=m[m.length-1]||[];
+  return {id:String(id), addr:f[1]||S.chatAddr||'', name:f[2]||null, sub:f[6], subs:[], unread:0,
+    msgs:m.map(function(r,i){return {id:i+1, body:r[3], time:r[4], out:!!r[5], st:0, err:''}})};
+}
+function loadThreads(){ if (VIEW) { SMS.threads=viewThreads(); SMS.lines=(D.sms&&D.sms.lines)||[]; if (S.screen==='sms') { var y=window.scrollY; render(); window.scrollTo(0,y); } } else B.loadThreads(); }
+function loadChat(id, addr){ if (VIEW) { SMS.chat=viewChat(id); S.chatId=String(id); if (S.screen==='chat') drawChat(); } else B.loadChat(id, addr); }
 function smsScreen(){
+  if (VIEW) { SMS.threads=viewThreads(); SMS.lines=(D.sms&&D.sms.lines)||[]; }
   smsPickTab();
   var ls=smsLines();
   var h='<div class="wrap"><button class="back" data-act="back">→ رجوع</button><div class="row"><h1>الرسايل</h1><button class="pill" data-act="newchat">رسالة جديدة</button></div>'+smsTabs('smstab');
@@ -989,12 +1016,14 @@ function simRow(){
     return '<button class="chip'+(x===S.sendSub?' on':'')+'" style="min-height:34px;padding:4px 12px;font-size:13px" data-act="sim" data-sub="'+x+'">'+esc(lineName(x))+'</button>'; }).join('')+'</div>';
 }
 function composeBar(){
+  if (VIEW) return '<div class="compose"><div class="in3 xs mute" style="justify-content:center;min-height:40px;align-items:center">الرد من «محافظي» على الأندرويد</div></div>';
   var a=(SMS.chat&&SMS.chat.addr)||S.chatAddr||'';
   if (a && !canReply(a)) return '<div class="compose"><div class="in3 xs mute" style="justify-content:center;min-height:40px;align-items:center">مينفعش ترد على الاسم ده، هو بيبعت بس</div></div>';
   return '<div class="compose" id="compose">'+simRow()+'<div class="in3"><textarea id="smsText" rows="1" placeholder="اكتب رسالة" dir="auto" aria-label="الرسالة">'+esc(S.draft||'')+'</textarea>'+
     '<button data-act="send">ابعت</button></div></div>';
 }
 function chatScreen(){
+  if (VIEW && S.chatId) SMS.chat=viewChat(S.chatId);
   return '<div class="wrap"><button class="back" data-act="back">→ رجوع</button><div class="col" style="gap:2px" id="chatHead">'+chatHead()+'</div>'+
     '<div class="chat" id="chat">'+chatBody()+'</div></div>'+composeBar();
 }
@@ -1085,7 +1114,7 @@ document.addEventListener('click', function(e){
     case 'callperm': if (B.askCallPerm) B.askCallPerm(); break;
     case 'accset': S.accTried=true; if (B.openAccessibility) B.openAccessibility(); break;
     case 'xfer':
-      S.xfAsk=false;
+      S.xfAsk=false; PIN='';
       // from a wallet's screen, or with one wallet picked on the home screen: that wallet's line
       var pre=el.dataset.w || (S.screen==='home' && S.filter!=='all' ? S.filter : '');
       if (!(X().accounts||[]).some(function(n){return n.w===pre})) pre=S.xf&&S.xf.w;
@@ -1098,6 +1127,8 @@ document.addEventListener('click', function(e){
       if (!VIEW && B.copyText) B.copyText(rcText(tc));
       else if (navigator.clipboard) navigator.clipboard.writeText(rcText(tc)).then(function(){toast('اتنسخ')}, function(){toast('مقدرتش أنسخ')});
       break;
+    case 'pin': if (PIN.length<8) PIN+=el.dataset.d; pinShow(); break;
+    case 'pindel': PIN=PIN.slice(0,-1); pinShow(); break;
     case 'xacc': xferRead(); S.xf.w=el.dataset.w; xferSheet(); break;
     case 'xnext':
       var xf=xferRead(), bad=xferCheck(xf);
@@ -1108,7 +1139,7 @@ document.addEventListener('click', function(e){
       if (!S.xf) break;
       var gb=document.getElementById('xgo'); if (gb) { gb.disabled=true; gb.textContent=VIEW?'بيبعت…':'بيطلب الكود…'; }
       B.sendXfer(JSON.stringify({w:S.xf.w,to:S.xf.to,a:S.xf.a,pin:S.xf.pin}));
-      S.xf.pin=''; break;
+      S.xf.pin=''; PIN=''; break;
     case 'xdial': var dx=xferRead(); if (!xMobile(dx.to)) { toast('اكتب رقم موبايل مصري صح'); break; } if (B.dialXfer) B.dialXfer(xMobile(dx.to), digits(dx.a)); break;
     case 'xcode':
       var xc=document.getElementById('s_xcode'); if (!xc) break;
@@ -1116,11 +1147,11 @@ document.addEventListener('click', function(e){
     case 'xcodedef': if (B.setXferCode) B.setXferCode(''); toast('رجع الكود العادي'); break;
     case 'appinfo': if (B.openAppInfo) B.openAppInfo(); break;
     case 'defapps': if (B.openDefaultApps) B.openDefaultApps(); break;
-    case 'sms': closeSheet(); SMS.threads=null; go('sms'); B.loadThreads(); break;
-    case 'smsline': S.smsSub=+el.dataset.sub; SMS.threads=null; go('sms'); B.loadThreads(); break;
+    case 'sms': closeSheet(); SMS.threads=null; go('sms'); loadThreads(); break;
+    case 'smsline': S.smsSub=+el.dataset.sub; SMS.threads=null; go('sms'); loadThreads(); break;
     case 'smstab': S.smsSub=+el.dataset.sub; S.sendSub=S.smsSub; render(); break;
     // a conversation opened from a line's tab replies on that line
-    case 'chat': SMS.chat=null; S.draft=''; S.sendSub=(S.screen==='sms' && smsLines().length>1 && S.smsSub!=null)?S.smsSub:null; go('chat',{chatId:el.dataset.id, chatAddr:el.dataset.a}); B.loadChat(el.dataset.id, el.dataset.a); break;
+    case 'chat': SMS.chat=null; S.draft=''; S.sendSub=(S.screen==='sms' && smsLines().length>1 && S.smsSub!=null)?S.smsSub:null; go('chat',{chatId:el.dataset.id, chatAddr:el.dataset.a}); loadChat(el.dataset.id, el.dataset.a); break;
     case 'newchat': SMS.chat=null; S.draft=''; if (S.smsSub!=null) S.sendSub=S.smsSub; go('chat',{chatId:'', chatAddr:''}); setTimeout(function(){var i=document.getElementById('smsTo'); if(i) i.focus();},200); break;
     case 'send': sendSms(); break;
     case 'sim': S.sendSub=+el.dataset.sub; var cp=document.getElementById('compose'), o=cp&&cp.querySelector('.chips'); if (o) o.outerHTML=simRow(); break;

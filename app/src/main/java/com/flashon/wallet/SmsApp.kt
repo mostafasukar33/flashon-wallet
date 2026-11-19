@@ -325,6 +325,33 @@ object SmsApp {
         return JSONObject().put("threads", out).put("unread", unread).put("lines", ls)
     }
 
+    /**
+     * The last messages for the iPhone (the same tabs and conversations there, to read): newest first, as
+     * [thread, address, name, text, time, out (0/1), SIM line, read (0/1)], and unread per line. It goes up
+     * inside the account, locked with the link's password like everything else. Blocking.
+     */
+    fun export(ctx: Context, store: Store, max: Int = 400): JSONObject {
+        val names = Names(ctx, store)
+        val lines = subs(ctx)
+        val msgs = JSONArray()
+        try {
+            ctx.contentResolver.query(Telephony.Sms.CONTENT_URI,
+                arrayOf(Telephony.Sms.THREAD_ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.READ, Telephony.Sms.SUBSCRIPTION_ID),
+                null, null, Telephony.Sms.DATE + " DESC")?.use { c ->
+                while (c.moveToNext() && msgs.length() < max) {
+                    val type = c.getInt(4)
+                    if (type == Telephony.Sms.MESSAGE_TYPE_DRAFT) continue
+                    val addr = c.getString(1) ?: ""
+                    val sub = if (c.isNull(6)) -1 else c.getInt(6)
+                    msgs.put(JSONArray().put(c.getLong(0)).put(addr).put(names.of(addr) ?: "").put((c.getString(2) ?: "").take(600))
+                        .put(c.getLong(3)).put(if (type == Telephony.Sms.MESSAGE_TYPE_INBOX) 0 else 1)
+                        .put(if (sub in lines) sub else (lines.firstOrNull() ?: -1)).put(c.getInt(5)))
+                }
+            }
+        } catch (_: Exception) { }
+        return JSONObject().put("lines", unreadByLine(ctx)).put("msgs", msgs)
+    }
+
     /** Unread messages per SIM line, line 1 first (the messages card on the main screen). */
     fun unreadByLine(ctx: Context): JSONArray {
         val lines = subs(ctx)
@@ -450,6 +477,8 @@ class SmsDeliverReceiver : BroadcastReceiver() {
                 // money notifications turned off: still a plain one, as the SMS app is the only one that notifies now
                 if (!store.txNotify) for (i in all.indices) if (isWallet[i]) try { SmsApp.notify(app, store, all[i], threads[i]) } catch (_: Exception) { }
                 MainActivity.smsChanged()
+                // the iPhone's messages tabs too (locked with the link's password like the rest)
+                if (Sync.isOn(store)) try { Sync.pushIfOn(app, store) } catch (_: Exception) { }
             } catch (_: Exception) {
             } finally {
                 done.countDown()

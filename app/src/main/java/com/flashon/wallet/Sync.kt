@@ -225,6 +225,8 @@ object Sync {
             val bodies = JSONObject()
             for (s in store.allSms()) if (s.id in ids) bodies.put(s.id, s.body)
             o.put("bodies", bodies)
+            // the messages (tabs per line) to read on the iPhone too, when «محافظي» is the SMS app
+            if (SmsApp.isDefault(ctx)) try { o.put("sms", SmsApp.export(ctx, store)) } catch (_: Exception) { }
             val plain = o.toString()
 
             val hash = b64(sha(plain.toByteArray(Charsets.UTF_8)))
