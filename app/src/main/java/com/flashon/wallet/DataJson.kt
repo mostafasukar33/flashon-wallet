@@ -23,6 +23,7 @@ object DataJson {
         o.put("permission", SmsSource.hasPermission(ctx))
         o.put("batteryOk", pm.isIgnoringBatteryOptimizations(ctx.packageName))
         o.put("watch", WatchService.running)
+        o.put("notes", Freeze.notes(ctx))   // is the "محافظي شغال" line showing, and are the notification channels on
         o.put("hold", Freeze.json(store))   // did the phone freeze the app while closed (Infinix "Stop app when idle")
         o.put("notifOk", ctx.getSystemService(android.app.NotificationManager::class.java).areNotificationsEnabled())
         o.put("settings", JSONObject()

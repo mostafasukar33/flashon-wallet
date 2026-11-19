@@ -107,6 +107,11 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    override fun onStop() {
+        super.onStop()
+        Freeze.recordBackground(this)   // for the server log: does Android still count it as running once it's off the screen
+    }
+
     override fun onDestroy() {
         try { unregisterReceiver(downloadDone) } catch (_: Exception) { }
         if (current?.get() === this) current = null

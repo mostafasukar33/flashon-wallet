@@ -122,7 +122,7 @@ var VIEW = !!(B && B.viewOnly);
 if (VIEW) document.documentElement.classList.add('view');
 if (!B) {
   var mock = {
-    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:true, notifOk:true, watch:true, hold:{n:3,at:Date.now()-120000,gap:540000,best:0,proven:1200000,held:true,missAt:Date.now()-120000,missLag:511000,tr:true}, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
+    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:true, notifOk:true, watch:true, notes:{line:false,watch:3,tx:0,limits:4},hold:{n:3,at:Date.now()-120000,gap:540000,best:0,proven:1200000,held:true,missAt:Date.now()-120000,missLag:511000,tr:true}, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
     settings:{monthReceive:200000,monthSend:200000,daySend:60000,dayReceiveOn:false,dayReceive:60000,feesCount:true},
     update:{available:true,version:'2'},
     months:['2026-10'],
@@ -288,9 +288,10 @@ function home(){
       '<div><span>فاضل تحويل الشهر ده</span><b class="num" style="text-align:right">'+fmt(leftM)+'</b></div></div>'+
       (locked>0.5?'<div class="lock">'+fmt(locked)+' ج هيتقفلوا للشهر الجاي</div>':'')+'</div>';
   }
-  if (!VIEW && held()) h+='<div class="alert bad" style="gap:8px"><b>⚠️ الموبايل وقّف التطبيق '+dur(D.hold.gap)+' وهو مقفول</b>'+
-    '<span style="line-height:1.7">علشان كده التحويل مبيوصلش ولا بيروح الآيفون غير لما تفتح التطبيق. ده إعداد في الموبايل نفسه بيجمّد التطبيقات المقفولة، ولازم يتقفل مرة واحدة بإيدك.</span>'+
-    '<button class="btn main" data-act="fixhold">صلّحه دلوقتي</button></div>';
+  if (!VIEW && held()) h+='<div class="alert bad" style="gap:8px"><b>⚠️ الموبايل جمّد التطبيق '+dur(D.hold.gap)+' وهو مقفول</b>'+
+    '<span style="line-height:1.7">علشان كده التحويل اتأخر ومراحش الآيفون غير لما فتحت التطبيق.</span>'+
+    '<button class="btn main" data-act="fixhold">التفاصيل والإعدادات</button></div>';
+  if (!VIEW && notesOff()) h+='<div class="minibat"><span>إشعارات التطبيق مقفولة أو مستخبية، فمفيش إشعار بالتحويلات هنا</span><button data-act="notif">شغّلها</button></div>';
   else if (!VIEW && !D.batteryOk) h+='<div class="minibat"><span>اسمح للتطبيق يشتغل في الخلفية عشان ميفوتش رسايل</span><button data-act="battery">اسمحله</button></div>';
 
   // ---- each wallet ----
@@ -458,7 +459,8 @@ function settingsScreen(){
 
   h+='<div class="card col" style="gap:6px"><h2>الإشعارات</h2>'+
     '<label class="switch"><span style="font-size:15px">إشعار مع كل عملية</span><input type="checkbox" id="s_txn"'+(D.txNotify?' checked':'')+'></label>'+
-    '<span class="xs mute" style="line-height:1.6">أول ما فلوس تدخل أو تخرج يجيلك إشعار بالمبلغ والاسم والرصيد. تنبيهات الحدود بتيجي دايماً.</span></div>';
+    '<span class="xs mute" style="line-height:1.6">أول ما فلوس تدخل أو تخرج يجيلك إشعار بالمبلغ والاسم والرصيد. تنبيهات الحدود بتيجي دايماً.</span>'+
+    (notesOff()?'<div class="alert mid"><b>⚠️ إشعارات التطبيق مقفولة أو مستخبية</b><span style="line-height:1.7">الموبايل مش بيعرض إشعارات «محافظي»'+(D.notes&&D.watch&&!D.notes.line?'، حتى سطر «💰 محافظي شغال» مش ظاهر':'')+'. دوس تحت وشغّل «السماح بالإشعارات» وكل الأنواع اللي تحتها.</span><button class="btn ghost" data-act="notif">شغّل الإشعارات</button></div>':'')+'</div>';
 
   var mo=D.months.map(function(m){return '<option value="'+m+'">'+monthName(m)+'</option>'}).join('');
   var wo='<option value="all">كل المحافظ</option>'+D.now.map(function(n){return '<option value="'+n.w+'">'+esc(n.label)+'</option>'}).join('');
@@ -473,6 +475,8 @@ function settingsScreen(){
 }
 
 function held(){ return !!(D.hold && D.hold.held); }
+function notesOff(){ var n=D.notes; return D.notifOk===false || !!(n && ((D.watch && !n.line) || n.watch===0 || n.tx===0)); }
+var ALARM='<span class="xs mute" style="line-height:1.6">علامة المنبّه ⏰ اللي فوق جنب الساعة دي من «محافظي»: بيصحّي نفسه بيها كل دقيقة علشان الموبايل ميجمّدوش. مش منبّه هيرن.</span>';
 function times(n){ return n===2?'مرتين':n<=10?n+' مرات':n+' مرة'; }
 function en(t){ return '<bdi dir="ltr" style="white-space:nowrap">('+t+')</bdi>'; }
 function dur(ms){
@@ -486,18 +490,19 @@ function bgState(){
     return '<div class="alert bad"><b>⚠️ الموبايل جمّد التطبيق '+dur(H.gap)+' وهو مقفول</b>'+
       '<span style="line-height:1.7">آخر مرة '+dayF.format(new Date(H.at))+' الساعة '+timeF.format(new Date(H.at))+(H.n>1?'، واتكررت '+times(H.n):'')+'.'+
       (H.missLag?' وآخر تحويل وصل التطبيق بعد '+dur(H.missLag)+' من وصول الرسالة.':'')+
-      ' وهو متجمّد مفيش أي حاجة في التطبيق بتشتغل، ولا حتى استقبال الرسايل، لحد ما تفتحه. والتطبيق ميقدرش يقفل الإعداد ده لوحده، فاعمل الخطوات دي مرة واحدة:</span></div>'+holdSteps();
+      ' وهو متجمّد مفيش أي حاجة في التطبيق بتشتغل، ولا حتى استقبال الرسايل، لحد ما تفتحه.</span></div>'+holdSteps();
   }
   if (H.at) {
     return '<div class="alert good"><b>✓ اتصلحت</b><span style="line-height:1.7">التطبيق فضل صاحي '+dur(H.best)+' والشاشة مقفولة من غير ما الموبايل يجمّده، فالتحويل بيوصل الآيفون في نفس اللحظة.</span></div>'+
-      '<span class="xs mute" style="line-height:1.6">لو رجع جمّده تاني هيظهرلك تنبيه أحمر فوق على طول.</span>';
+      '<span class="xs mute" style="line-height:1.6">لو رجع جمّده تاني هيظهرلك تنبيه أحمر فوق على طول.</span>'+ALARM;
   }
-  return '<span class="small mute" style="line-height:1.7">التطبيق شغال ومستني التحويلات (علشان كده فيه سطر «💰 محافظي شغال» ثابت فوق). وبيراقب نفسه: لو الموبايل جمّده وهو مقفول هيظهرلك تنبيه أحمر على طول.</span>'+bgBtns();
+  return '<span class="small mute" style="line-height:1.7">التطبيق شغال ومستني التحويلات (علشان كده فيه سطر «💰 محافظي شغال» ثابت فوق). وبيراقب نفسه: لو الموبايل جمّده وهو مقفول هيظهرلك تنبيه أحمر على طول.</span>'+ALARM+bgBtns();
 }
 function holdSteps(){
   var H=D.hold||{}, tr=!!H.tr;
   return '<div class="col" style="gap:8px;line-height:1.7">'+
-    (D.notifOk===false?'<button class="btn ghost" data-act="notif">شغّل إشعارات التطبيق</button>':'')+
+    '<span class="small">التطبيق بقى بيصحّي نفسه كل دقيقة بمنبّه من نوع «المنبّه» (علامة ⏰ فوق)، وده النوع اللي إنفينكس المفروض يسيبه يوصل للتطبيق حتى وهو متجمّد. واتأكد كمان إن الإعدادات دي كلها مظبوطة:</span>'+
+    (notesOff()?'<button class="btn ghost" data-act="notif">شغّل إشعارات التطبيق</button><span class="xs mute">شغّل «السماح بالإشعارات» وكل الأنواع اللي تحتها، ومن ضمنها «محافظي شغال» و«العمليات».</span>':'')+
     (D.batteryOk===false?'<button class="btn ghost" data-act="battery">من غير توفير بطارية</button><span class="xs mute">دوس «سماح» (Allow).</span>':'')+
     '<b>1. صفحة البطارية بتاعة «محافظي» (دي الأهم)</b>'+
     '<button class="btn main" data-act="appbat">افتحها</button>'+

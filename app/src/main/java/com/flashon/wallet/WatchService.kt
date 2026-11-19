@@ -34,8 +34,12 @@ import android.provider.Telephony
  */
 class WatchService : Service() {
     companion object {
-        private const val CH = "watch2"   // "watch" was MIN importance: no icon at the top, so it looked like nothing was running
-        private const val NOTE_ID = 7001
+        // "watch" was MIN, "watch2" LOW (XOS tucked it away as silent): this one shows at the top, with no sound
+        const val CH = "watch3"
+        const val NOTE_ID = 7001
+        /** How late the last minute tick came, and the worst since this process started (ms), for the server log. */
+        @Volatile var tickLate = 0L
+        @Volatile var tickLateMax = 0L
         @Volatile var running = false
             private set
         @Volatile var bornAt = 0L   // when this process started the watcher (0 = not in this process)
@@ -81,10 +85,12 @@ class WatchService : Service() {
     private fun note(): Notification {
         val nm = getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CH) == null) {
-            try { nm.deleteNotificationChannel("watch") } catch (_: Exception) { }
-            nm.createNotificationChannel(NotificationChannel(CH, "محافظي شغال", NotificationManager.IMPORTANCE_LOW).apply {
+            for (old in listOf("watch", "watch2")) try { nm.deleteNotificationChannel(old) } catch (_: Exception) { }
+            nm.createNotificationChannel(NotificationChannel(CH, "محافظي شغال", NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = "علشان التحويلات توصل الموبايل التاني في نفس اللحظة"
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             })
         }
         val open = PendingIntent.getActivity(this, 1, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -95,6 +101,8 @@ class WatchService : Service() {
             .setContentTitle("💰 محافظي شغال ومستني التحويلات")
             .setContentIntent(open)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(Notification.CATEGORY_SERVICE)
             .setShowWhen(false)
             .build()
     }
@@ -181,7 +189,8 @@ class WatchJob : JobService() {
 }
 
 /**
- * Every minute, an exact alarm that wakes the phone even in deep sleep: reads the last wallet messages
+ * Every minute, an alarm-clock alarm that wakes the phone even in deep sleep. Another developer found
+ * XOS still delivers that kind to an app it froze; an ordinary exact alarm was held 18 minutes here: reads the last wallet messages
  * and sends what's new. On phones that hold back the SMS broadcast from apps in the background
  * (Infinix on Android 16 did: nothing came until the app was opened), this is what still gets it out.
  */
@@ -193,15 +202,28 @@ class TickReceiver : BroadcastReceiver() {
             val am = app.getSystemService(AlarmManager::class.java) ?: return
             val pi = PendingIntent.getBroadcast(app, 3, Intent(app, TickReceiver::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val at = System.currentTimeMillis() + EVERY
+            Store(app).putLong("tick_at", at)
             try {
-                if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
-                else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
-            } catch (_: Exception) { try { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi) } catch (_: Exception) { } }
+                if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) {
+                    // an "alarm clock" alarm: reported to still reach an app XOS froze (a plain exact one waited 18 minutes)
+                    val show = PendingIntent.getActivity(app, 4, Intent(app, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                    am.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), pi)
+                } else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+            } catch (_: Exception) {
+                try { am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi) } catch (_: Exception) {
+                    try { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi) } catch (_: Exception) { } }
+            }
         }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         WatchService.saw("tick")
+        val due = Store(context).getLong("tick_at")
+        if (due > 0) {
+            val late = (System.currentTimeMillis() - due).coerceAtLeast(0)
+            WatchService.tickLate = late
+            if (late > WatchService.tickLateMax) WatchService.tickLateMax = late
+        }
         next(context)
         try { Freeze.beat(context) } catch (_: Exception) { }
         val pending = goAsync()

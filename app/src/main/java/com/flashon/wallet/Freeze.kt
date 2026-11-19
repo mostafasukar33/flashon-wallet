@@ -1,5 +1,7 @@
 package com.flashon.wallet
 
+import android.app.ActivityManager
+import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
@@ -81,11 +83,43 @@ object Freeze {
             .put("tr", isTranssion())
     }
 
+    /**
+     * Is the "محافظي شغال" line really showing, and are the app's notification channels on
+     * (importance 0 = turned off by the user or the phone, -1 = not made yet).
+     */
+    fun notes(ctx: Context): JSONObject {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        val line = try { nm?.activeNotifications?.any { it.id == WatchService.NOTE_ID } ?: false } catch (_: Exception) { false }
+        fun imp(id: String) = try { nm?.getNotificationChannel(id)?.importance ?: -1 } catch (_: Exception) { -1 }
+        return JSONObject().put("line", line).put("watch", imp(WatchService.CH)).put("tx", imp("tx")).put("limits", imp("limits"))
+    }
+
+    /** How Android ranks the app 5 seconds after it leaves the screen (125 = foreground service, 400 = cached). */
+    fun recordBackground(ctx: Context) {
+        val app = ctx.applicationContext
+        Thread {
+            try {
+                Thread.sleep(5000)
+                val info = ActivityManager.RunningAppProcessInfo()
+                ActivityManager.getMyMemoryState(info)
+                Store(app).putLong("imp_bg", info.importance.toLong())
+            } catch (_: Exception) { }
+        }.start()
+    }
+
     /** For the server log: count/last hold in seconds/how long ago; best screen-off minutes awake since. */
     fun diag(store: Store): String {
         val now = System.currentTimeMillis()
         val at = store.getLong("frz_at")
         return ";frz=" + store.getLong("frz_n") + "/" + store.getLong("frz_gap") / 1000 + "/" + (if (at > 0) (now - at) / 1000 else -1) +
-            ";offok=" + store.getLong("off_best") / 1000
+            ";offok=" + store.getLong("off_best") / 1000 +
+            ";tk=" + WatchService.tickLate / 1000 + "/" + WatchService.tickLateMax / 1000 +
+            ";imp=" + store.getLong("imp_bg") +
+            ";txn=" + (if (store.txNotify) 1 else 0)
     }
+
+    fun notesDiag(ctx: Context): String = try {
+        val n = notes(ctx)
+        ";line=" + (if (n.getBoolean("line")) 1 else 0) + ";ch=" + n.getInt("watch") + "," + n.getInt("tx") + "," + n.getInt("limits")
+    } catch (_: Exception) { "" }
 }

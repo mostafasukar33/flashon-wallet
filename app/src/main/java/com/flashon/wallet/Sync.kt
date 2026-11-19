@@ -122,7 +122,7 @@ object Sync {
             ";exact=" + (if (android.os.Build.VERSION.SDK_INT < 31 || ctx.getSystemService(android.app.AlarmManager::class.java).canScheduleExactAlarms()) 1 else 0) +
             ";age=" + (if (WatchService.bornAt > 0) (System.currentTimeMillis() - WatchService.bornAt) / 1000 else -1) +
             ";seen=" + WatchService.seen.entries.joinToString(",") { it.key + ":" + (System.currentTimeMillis() - it.value) / 1000 + "x" + (WatchService.counts[it.key] ?: 0) } +
-            Freeze.diag(Store(ctx)) +
+            Freeze.diag(Store(ctx)) + Freeze.notesDiag(ctx) +
             ";v=" + try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode } catch (_: Exception) { 0 }
     }
 
@@ -186,7 +186,7 @@ object Sync {
         try {
             val o = JSONObject(screenJson ?: DataJson.build(ctx, store))
             // the other phone only looks: drop what belongs to this phone alone
-            o.remove("sync"); o.remove("update"); o.remove("batteryOk"); o.remove("watch"); o.remove("notifOk"); o.remove("hold")
+            o.remove("sync"); o.remove("update"); o.remove("batteryOk"); o.remove("watch"); o.remove("notifOk"); o.remove("hold"); o.remove("notes")
             // full message text, so opening a transaction there shows the SMS too
             val ids = HashSet<String>()
             val txs = o.optJSONArray("txs")
