@@ -82,6 +82,9 @@ object Ussd {
     private val STRONG_OK = rx("تم التحويل|تم تحويل|تمت عملية التحويل|بنجاح|successful")
     private val DONE = rx("تم التحويل|تم تحويل|تمت عملية|تمت العملية|تم ارسال|تم إرسال|بنجاح|successful|success|has been transferred|transferred|سيتم تحويل|جاري تنفيذ طلبك|جاري التنفيذ|تم استلام طلبك|طلبك قيد التنفيذ|سيصلك")
 
+    /** Does this text ask something (the PIN, or to confirm): a question, even when it comes as a notification. */
+    fun asks(text: String): Boolean { val t = clean(text); return PIN.containsMatchIn(t) || CONFIRM.containsMatchIn(t) }
+
     /** The screen's text with Arabic digits as ASCII and the number's digits kept together, for matching. */
     private fun clean(text: String) = Parser.fold(Parser.normalize(text))
 

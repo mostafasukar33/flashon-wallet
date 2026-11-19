@@ -240,6 +240,11 @@ fun main() {
     check("ussd limit", st("عفواً لقد تجاوزت الحد اليومي للتحويل", false, pin = true) == Ussd.Step.FAIL)
     check("ussd unsure", st("طلبك وصل وهيتراجع", false, pin = true) == Ussd.Step.UNSURE)
 
+    // ---- a question, even when it comes as a notification ----
+    check("asks: PIN", Ussd.asks("لتأكيد تحويل 500 جنيه الى 01012345678 ادخل الرقم السري"))
+    check("asks: confirm", Ussd.asks("سيتم تحويل 500 جنيه. للتأكيد اضغط 1"))
+    check("asks: not a final answer", !Ussd.asks("تم تحويل 500 جنيه لرقم 01012345678 بنجاح"))
+
     // ---- Vodafone's SMS as the proof of a transfer made from the app ----
     val sent = t("2026-11-05T10:00:00+02:00")
     val proof = Parser.parse(RawSms("pf", "VF-Cash", "تم تحويل 750 جنيه لرقم 01012345678 مصاريف الخدمة 1 جنيه رصيد حسابك فى فودافون كاش الحالي 8000.00 رقم العملية: 0288885599000", sent + 40_000))!!

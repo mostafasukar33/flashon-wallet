@@ -111,6 +111,8 @@ class NoteListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         val s = sbn ?: return
+        // a transfer is running and the phone shows Vodafone's answer as a notification
+        Xfer.job?.let { j -> if (!j.done) try { Xfer.onNote(this, s.packageName, s.notification) } catch (_: Exception) { } }
         if (!maybeSms(this, s.packageName, s.notification)) return
         WatchService.saw("ntf")
         Poke.now(this, "ntf")

@@ -9,7 +9,9 @@ import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.ActivityOptions
 import android.app.PendingIntent
+import android.app.RemoteInput
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -65,6 +67,13 @@ object Xfer {
         @Volatile var seen = false
         @Volatile var done = false
         @Volatile var last = ""
+        @Volatile var lastNote = ""
+        /** Questions already answered: the same one coming as a screen and as a notification is answered once. */
+        private val answered = HashSet<String>()
+        @Synchronized fun claim(text: String): Boolean = answered.add(text.replace(Regex("\\s+"), " ").trim())
+        /** What Vodafone showed and what the app did, for the list (never the PIN). */
+        val trace = java.util.Collections.synchronizedList(ArrayList<String>())
+        fun log(s: String) { trace.add(s.replace(Regex("\\s+"), " ").trim().take(140)); if (trace.size > 12) trace.removeAt(0) }
         /** The PIN, once: it's gone from memory right after. */
         fun takePin(): String? { val p = pin ?: return null; pin = null; val s = String(p); p.fill('0'); return s }
         fun wipe() { pin?.fill('0'); pin = null }
@@ -248,6 +257,7 @@ object Xfer {
                 end(ctx.applicationContext, j, "fail", "مقدرتش أختار خط المحفظة دي للاتصال، فمش هحوّل من خط تاني"); return
             }
             tm.placeCall(Uri.fromParts("tel", j.code, null), extras)
+            j.log("طلب الكود" + if (h != null) " على خط المحفظة" else "")
         } catch (e: Exception) {
             end(ctx.applicationContext, j, "fail", if (e is SecurityException) "«محافظي» محتاج إذن المكالمات" else "مقدرتش أطلب الكود (${e.javaClass.simpleName})")
         }
@@ -371,15 +381,21 @@ object Xfer {
         if (key == j.last) return
         j.last = key
         j.seen = true
-        when (Ussd.step(s.text, s.input != null, j.to, j.pinSent, j.confirmSent)) {
+        j.log("شاشة: " + s.text)
+        val step = Ussd.step(s.text, s.input != null, j.to, j.pinSent, j.confirmSent)
+        // a question already answered from its notification: nothing more to do here
+        if (s.input != null && Ussd.asks(s.text) && !j.claim(s.text)) return
+        when (step) {
             Ussd.Step.WAIT -> { }
             Ussd.Step.PIN -> {
+                j.log("كتب الرقم السري في الشاشة")
                 val pin = j.takePin()
                 if (pin == null || !type(s.input!!, pin)) { tap(svc, false); end(svc, j, "stop", "مقدرتش أكتب الرقم السري في شاشة فودافون"); return }
                 j.pinSent = true
                 main.postDelayed({ tap(svc, true) }, 350)
             }
             Ussd.Step.CONFIRM -> {
+                j.log("أكد بـ 1 في الشاشة")
                 if (!type(s.input!!, "1")) { tap(svc, false); end(svc, j, "stop", "مقدرتش أأكد في شاشة فودافون"); return }
                 j.confirmSent = true
                 main.postDelayed({ tap(svc, true) }, 350)
@@ -388,6 +404,90 @@ object Xfer {
             Ussd.Step.OK -> { tap(svc, true); end(svc, j, "ok", s.text) }
             Ussd.Step.FAIL -> { tap(svc, true); end(svc, j, "fail", s.text) }
             Ussd.Step.UNSURE -> { tap(svc, true); end(svc, j, "unsure", s.text) }
+        }
+    }
+
+    // ---------- Vodafone's answer as a notification ----------
+
+    private val VF_WORDS = Regex("فودافون|كاش|محفظ|جنيه|رصيد|تحويل|vodafone|cash|wallet|ussd|mmi|\\b1\\s*[-.)]", RegexOption.IGNORE_CASE)
+
+    /** All the words of a notification. */
+    private fun noteText(n: Notification): String {
+        val e = n.extras ?: return ""
+        val parts = LinkedHashSet<String>()
+        for (k in listOf(Notification.EXTRA_TITLE, Notification.EXTRA_TEXT, Notification.EXTRA_BIG_TEXT, Notification.EXTRA_SUMMARY_TEXT))
+            e.getCharSequence(k)?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { parts += it }
+        e.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.forEach { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() }?.let { s -> parts += s } }
+        // a longer text holds the shorter one: keep the longest of each
+        return parts.filter { p -> parts.none { it != p && it.contains(p) } }.joinToString("\n")
+    }
+
+    private fun send(ctx: Context, pi: PendingIntent?, fill: Intent?): Boolean {
+        if (pi == null) return false
+        return try {
+            val opts = if (Build.VERSION.SDK_INT >= 34) ActivityOptions.makeBasic()
+                .setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED).toBundle() else null
+            pi.send(ctx, 0, fill, null, null, null, opts); true
+        } catch (_: Exception) { false }
+    }
+
+    /** Types [value] into the notification's own reply box (the one that shows under "رد"), and sends it. */
+    private fun reply(ctx: Context, a: Notification.Action, value: String): Boolean {
+        val inputs = a.remoteInputs ?: return false
+        val results = Bundle().apply { for (r in inputs) putCharSequence(r.resultKey, value) }
+        val fill = Intent()
+        RemoteInput.addResultsToIntent(inputs, fill, results)
+        if (Build.VERSION.SDK_INT >= 28) RemoteInput.setResultsSource(fill, RemoteInput.SOURCE_FREE_FORM_INPUT)
+        return send(ctx, a.actionIntent, fill)
+    }
+
+    /**
+     * Some phones show Vodafone's question as a notification instead of a box on the screen (it pops up at
+     * the top and goes into the notification list). Read the same way as a screen: the PIN or the
+     * confirmation goes into the notification's reply box; with no reply box, the notification is opened so
+     * the box shows and [onScreen] answers it; a final answer ends the transfer. Called from [NoteListener]
+     * and [UssdService], whichever hears it first.
+     */
+    fun onNote(ctx: Context, pkg: String?, n: Notification?) {
+        val j = job ?: return
+        if (j.done || n == null || !phoneish(ctx, pkg)) return
+        if (n.category == Notification.CATEGORY_CALL || n.category == "missed_call") return   // a call, not Vodafone's answer
+        val text = noteText(n)
+        if (text.isBlank()) return
+        val key = text.replace(Regex("\\s+"), " ").trim()
+        if (key == j.lastNote) return
+        j.lastNote = key
+        j.seen = true
+        val replyAction = n.actions?.firstOrNull { !it.remoteInputs.isNullOrEmpty() }
+        j.log("إشعار" + (if (replyAction != null) " فيه رد" else "") + ": " + text)
+        if (Ussd.asks(text)) {
+            if (!j.claim(text)) return
+            if (replyAction == null) {
+                // no reply box in it: open it, so Vodafone's box shows on the screen
+                j.log("فتح الإشعار")
+                if (!send(ctx, n.contentIntent, null)) j.log("مقدرش يفتح الإشعار")
+                return
+            }
+            when (Ussd.step(text, true, j.to, j.pinSent, j.confirmSent)) {
+                Ussd.Step.PIN -> {
+                    val pin = j.takePin()
+                    if (pin == null || !reply(ctx, replyAction, pin)) { end(ctx, j, "stop", "مقدرتش أكتب الرقم السري في إشعار فودافون"); return }
+                    j.pinSent = true; j.log("رد على الإشعار بالرقم السري")
+                }
+                Ussd.Step.CONFIRM -> {
+                    if (!reply(ctx, replyAction, "1")) { end(ctx, j, "stop", "مقدرتش أأكد في إشعار فودافون"); return }
+                    j.confirmSent = true; j.log("رد على الإشعار بـ 1")
+                }
+                else -> end(ctx, j, "stop", text)   // a second PIN question, or a confirmation for another number
+            }
+            return
+        }
+        when (Ussd.step(text, false, j.to, j.pinSent, j.confirmSent)) {
+            Ussd.Step.OK -> end(ctx, j, "ok", text)
+            Ussd.Step.FAIL -> end(ctx, j, "fail", text)
+            Ussd.Step.WAIT -> { }   // "running…"
+            // a menu, or words it doesn't know but clearly Vodafone's: open it so it shows on the screen, and keep waiting
+            else -> if (VF_WORDS.containsMatchIn(text)) { j.log("فتح الإشعار"); send(ctx, n.contentIntent, null) }
         }
     }
 
@@ -411,7 +511,8 @@ object Xfer {
             // Vodafone's SMS already came for it: it went through, whatever the last screen said
             val h = history(store)
             val proven = (0 until h.length()).any { h.getJSONObject(it).let { o -> o.optString("id") == j.id && o.has("sms") } }
-            record(store, j.id, JSONObject().put("st", if (proven) "ok" else st).put("msg", msg))
+            record(store, j.id, JSONObject().put("st", if (proven) "ok" else st).put("msg", msg)
+                .put("trace", JSONArray(synchronized(j.trace) { j.trace.toList() })))
             note(app, if (proven) "✓ اتحوّل $amt ج لـ ${j.to}" else title, msg, false)
             // the iPhone already has Vodafone's SMS text for it (matchSms): no second notification over it
             if (j.from == "iphone" && !proven) tellIphone(app, store, title, msg, j.id)
@@ -482,6 +583,8 @@ class UssdService : AccessibilityService() {
         val e = event ?: return
         if (e.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
             val n = e.parcelableData as? Notification
+            // a transfer is running and the phone shows Vodafone's answer as a notification
+            Xfer.job?.let { j -> if (!j.done) try { Xfer.onNote(this, e.packageName?.toString(), n) } catch (_: Exception) { } }
             if (!NoteListener.connected && NoteListener.maybeSms(this, e.packageName?.toString(), n)) { WatchService.saw("acc"); Poke.now(this, "acc") }
             return
         }
@@ -526,7 +629,7 @@ class XferActivity : Activity() {
         if (kg != null && kg.isKeyguardLocked && !kg.isDeviceSecure) try { kg.requestDismissKeyguard(this, null) } catch (_: Exception) { }
         val j = Xfer.job
         setContentView(TextView(this).apply {
-            text = if (j != null) "⏳ بيحوّل ${Notifier.fmt(j.amount.toDouble())} ج لـ ${j.to}" else ""
+            text = if (j != null) "⏳ «محافظي» بيحوّل ${Notifier.fmt(j.amount.toDouble())} ج لـ ${j.to}\nاستنى ثواني لحد ما فودافون ترد" else ""
             textSize = 16f
             setTextColor(0xFFFFFFFF.toInt())
             setBackgroundColor(0xCC16181B.toInt())

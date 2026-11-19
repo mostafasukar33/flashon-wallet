@@ -637,6 +637,8 @@ function xferRows(list){
       (x.sms?'<span class="xs" style="color:var(--in);font-weight:600">🧾 اتأكد برسالة فودافون'+(x.ref?' · رقم العملية <span class="num">'+esc(x.ref)+'</span>':'')+'</span>':
         (x.st==='ok'||x.st==='unsure')&&Date.now()-(x.up||x.at)<15*60000?'<span class="xs mute">مستني رسالة فودافون…</span>':'')+
       (x.msg&&!x.sms?'<span class="xs mute" style="line-height:1.6;white-space:normal">'+esc(x.msg)+'</span>':'')+
+      (x.trace&&x.trace.length&&x.st!=='ok'?'<details style="font-size:12px;color:var(--mute)"><summary style="cursor:pointer">اللي حصل خطوة بخطوة</summary><ol style="margin:4px 0;padding-inline-start:18px;line-height:1.7">'+
+        x.trace.map(function(t){return '<li>'+esc(t)+'</li>'}).join('')+'</ol></details>':'')+
       (x.sms&&txOf(x.sms)?'<button class="pill" style="align-self:flex-start;margin-top:4px" data-act="receipt" data-id="'+esc(x.sms)+'">🧾 الإيصال</button>':'')+'</div></div>';
   }).join('');
 }
