@@ -71,6 +71,7 @@ object Xfer {
         /** The pages already read of a message Vodafone cut in pages ("… 0:مزيد"), and how many. */
         val pages = StringBuilder()
         @Volatile var more = 0
+        @Volatile var retries = 0
         /** Questions already answered: the same one coming as a screen and as a notification is answered once. */
         private val answered = HashSet<String>()
         @Synchronized fun claim(text: String): Boolean = answered.add(text.replace(Regex("\\s+"), " ").trim())
@@ -413,9 +414,20 @@ object Xfer {
             Ussd.Step.STOP -> { tap(svc, false); end(svc, j, "stop", j.pages.toString() + s.text) }
             // done: an answer screen is closed with OK; a "done" with a box under it is closed without sending anything
             Ussd.Step.OK -> { tap(svc, s.input == null); end(svc, j, "ok", s.text) }
-            Ussd.Step.FAIL -> { tap(svc, true); end(svc, j, "fail", s.text) }
+            Ussd.Step.FAIL -> { tap(svc, true); if (retryable(j, s.text)) retry(svc, j) else end(svc, j, "fail", s.text) }
             Ussd.Step.UNSURE -> { tap(svc, true); end(svc, j, "unsure", s.text) }
         }
+    }
+
+    /** A network hiccup before anything was typed: Vodafone never saw the code, so once more is safe. */
+    private fun retryable(j: Job, text: String) = !j.pinSent && !j.confirmSent && j.retries < 1 && Ussd.glitch(text)
+
+    private fun retry(ctx: Context, j: Job) {
+        j.retries++
+        j.log("مشكلة في الشبكة، بيطلب الكود تاني")
+        j.dialed = false; j.last = ""; j.lastNote = ""; j.pages.setLength(0); j.more = 0
+        val app = ctx.applicationContext
+        main.postDelayed({ if (job === j && !j.done) dial(app, j) }, 4000)
     }
 
     // ---------- Vodafone's answer as a notification ----------
@@ -503,7 +515,7 @@ object Xfer {
         }
         when (Ussd.step(text, false, j.to, j.pinSent, j.confirmSent)) {
             Ussd.Step.OK -> end(ctx, j, "ok", text)
-            Ussd.Step.FAIL -> end(ctx, j, "fail", text)
+            Ussd.Step.FAIL -> if (retryable(j, text)) retry(ctx, j) else end(ctx, j, "fail", text)
             Ussd.Step.WAIT -> { }   // "running…"
             // a menu, or words it doesn't know but clearly Vodafone's: open it so it shows on the screen, and keep waiting
             else -> if (VF_WORDS.containsMatchIn(text)) { j.log("فتح الإشعار"); send(ctx, n.contentIntent, null) }

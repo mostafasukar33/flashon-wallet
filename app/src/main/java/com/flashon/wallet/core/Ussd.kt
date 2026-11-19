@@ -80,10 +80,15 @@ object Ussd {
     private val RUNNING = rx("running|جار[ٍيى]?\\s*(تشغيل|تنفيذ|الإرسال|الارسال)|ussd code|mmi code|please wait|برجاء الانتظار|يرجى الانتظار|من فضلك انتظر")
     private val PIN = rx("الرقم السري|الرقم السرى|رقم سري|رقم سرى|رقمك السري|الرقم السري الخاص|كلمة السر|كلمه السر|كلمة المرور|كلمه المرور|الباسورد|\\bpin\\b|password|passcode|secret code")
     private val CONFIRM = rx("للتأكيد|للتاكيد|لتأكيد|لتاكيد|تأكيد|تاكيد|confirm|هل تريد|هل انت متأكد|هل أنت متأكد|موافق\\s*؟|اضغط\\s*1|ادخل\\s*1|أدخل\\s*1|1\\s*[-.:)]\\s*(نعم|موافق|تأكيد|تاكيد|yes|ok|confirm)")
-    private val WRONG = rx("غير صحيح|خطأ|خاطئ|غلط|incorrect|invalid|wrong|غير كاف|insufficient|فشل|لم تتم|لم يتم|failed|declined|مرفوض|تم رفض|تجاوز|exceeded|غير مسموح|not allowed|غير متاح|unavailable|موقوف|blocked|مغلق|تعذر|نأسف|عفوا|sorry|try again|حاول مره|حاول مرة|connection problem|غير مسجل|not registered|غير مشترك")
+    private val WRONG = rx("غير صحيح|خطأ|خاطئ|غلط|incorrect|invalid|wrong|غير كاف|insufficient|فشل|لم تتم|لم يتم|failed|declined|مرفوض|تم رفض|تجاوز|exceeded|غير مسموح|not allowed|غير متاح|unavailable|موقوف|blocked|مغلق|تعذر|نأسف|عفوا|sorry|try again|حاول مره|حاول مرة|connection problem|غير مسجل|not registered|غير مشترك|غير صالح|غير صالحه|مشكلة|مشكله|problem")
     // "تم تحويل" as words of its own: not inside "سيتم تحويل" (will be) or "لم يتم تحويل" (wasn't)
     private val STRONG_OK = rx("(?<!\\p{L})(?:تم التحويل|تم تحويل|تمت عملية التحويل)|بنجاح|successful")
     private val DONE = rx("تم التحويل|تم تحويل|تمت عملية|تمت العملية|تم ارسال|تم إرسال|بنجاح|successful|success|has been transferred|transferred|سيتم تحويل|جاري تنفيذ طلبك|جاري التنفيذ|تم استلام طلبك|طلبك قيد التنفيذ|سيصلك")
+
+    private val GLITCH = rx("مشكلة في الاتصال|مشكله في الاتصال|connection problem|invalid mmi|mmi غير صالح|رمز mmi|خطأ في الشبكة|network error|ussd error")
+
+    /** The phone or the network failed to carry the code ("حدثت مشكلة في الاتصال أو رمز MMI غير صالح"): Vodafone never saw it. */
+    fun glitch(text: String): Boolean = GLITCH.containsMatchIn(clean(text))
 
     /** Does this text ask something (the PIN, or to confirm): a question, even when it comes as a notification. */
     fun asks(text: String): Boolean { val t = clean(text); return PIN.containsMatchIn(t) || CONFIRM.containsMatchIn(t) }

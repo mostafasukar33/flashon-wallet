@@ -262,6 +262,12 @@ fun main() {
     check("'wasn't transferred' isn't done", Ussd.step("عفوا لم يتم تحويل 500 جنيه لرقم 01012345678 0:مزيد", true, "01012345678", true, false) != Ussd.Step.OK)
     check("the ad after it = stop", Ussd.step("دلوقتي لاستخدام محفظتك دوس 1 00:رجوع", true, me, true, false) == Ussd.Step.STOP)
 
+    // ---- the network hiccup from the third screenshot ----
+    val mmi = "رسالة Vodafone حدثت مشكلة في الاتصال أو رمز MMI غير صالح."
+    check("real MMI error = failed", Ussd.step(mmi, false, me, false, false) == Ussd.Step.FAIL, Ussd.step(mmi, false, me, false, false))
+    check("real MMI error = a hiccup (try again)", Ussd.glitch(mmi) && Ussd.glitch("Connection problem or invalid MMI code."))
+    check("a wrong PIN isn't a hiccup", !Ussd.glitch("عفواً، الرقم السري غير صحيح") && !Ussd.glitch("رصيدك غير كافٍ"))
+
     // ---- a question, even when it comes as a notification ----
     check("asks: PIN", Ussd.asks("لتأكيد تحويل 500 جنيه الى 01012345678 ادخل الرقم السري"))
     check("asks: confirm", Ussd.asks("سيتم تحويل 500 جنيه. للتأكيد اضغط 1"))
