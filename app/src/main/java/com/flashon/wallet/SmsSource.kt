@@ -72,18 +72,18 @@ object SmsSource {
      * [WatchService], or opening the app): the other phone first, then this phone's notification,
      * then the screens. A message that was already handled adds nothing and sends nothing. Blocking.
      */
-    fun deliver(ctx: Context, list: List<RawSms>, via: String = "") {
+    fun deliver(ctx: Context, list: List<RawSms>, via: String = "", smscLagMs: Long = -1) {
         if (list.isEmpty()) return
         // the screen is off: without this the phone sleeps right after the SMS and the send waits until it's picked up
         val wl = awake(ctx, "deliver", 90_000L)
-        try { deliverLocked(ctx, list, via) } finally { try { if (wl.isHeld) wl.release() } catch (_: Exception) { } }
+        try { deliverLocked(ctx, list, via, smscLagMs) } finally { try { if (wl.isHeld) wl.release() } catch (_: Exception) { } }
     }
 
     fun awake(ctx: Context, tag: String, ms: Long): android.os.PowerManager.WakeLock =
         (ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
             .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "flashon:$tag").apply { setReferenceCounted(false); acquire(ms) }
 
-    private fun deliverLocked(ctx: Context, list: List<RawSms>, via: String) = synchronized(DELIVER_LOCK) {
+    private fun deliverLocked(ctx: Context, list: List<RawSms>, via: String, smscLagMs: Long) = synchronized(DELIVER_LOCK) {
         val store = Store(ctx)
         val before = store.allSms().map { it.id }.toHashSet()
         if (store.addSms(list) == 0) return
@@ -94,6 +94,8 @@ object SmsSource {
             // how it was caught and how late (seconds), sent along so the server log shows where a delay comes from
             Sync.via = via; Sync.lag = ((now - fresh.minOf { it.time }) / 1000).coerceAtLeast(0)
             Freeze.caught(store, Sync.lag * 1000)
+            // the real delay, from the time the network sent it (a caught broadcast is stamped "now", so lag says 0 there)
+            Sync.smsc = if (smscLagMs >= 0) smscLagMs / 1000 else -1
             Sync.diag = try { Sync.diagOf(ctx) } catch (_: Exception) { "" }
             // the other phone first: read the new SMS alone and send, before the full ledger is built
             val sent = if (Sync.isOn(store)) Notifier.quick(store, fresh).also { Sync.notify(ctx, store, it) } else emptyList()
@@ -132,18 +134,37 @@ object SmsSource {
 class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         WatchService.saw("rcv")
-        val list = parse(context, intent)
-        if (list.isEmpty()) return
+        val ins = wallet(split(context, intent))
+        if (ins.isEmpty()) return
         val pending = goAsync()
         Thread {
-            try { SmsSource.deliver(context, list, "rcv") } catch (_: Exception) { } finally { pending.finish() }
+            try { SmsSource.deliver(context, ins.map { it.raw() }, "rcv", lagOf(ins)) } catch (_: Exception) { } finally { pending.finish() }
         }.start()
         WatchService.start(context)   // the receiver ran but the watcher was stopped: start it again
     }
 
+    /** One SMS as it arrived: the sender, the whole text, when the network sent it, and on which SIM. */
+    class In(val sender: String, val body: String, val sentAt: Long, val sim: String, val sub: Int, val pid: Int, val center: String?) {
+        fun raw() = RawSms(Store.idOf(sender, body), sender, body, System.currentTimeMillis(), sim)
+    }
+
     companion object {
-    fun parse(context: Context, intent: Intent): List<RawSms> {
-        if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return emptyList()
+    fun wallet(list: List<In>) = list.filter { SmsSource.isWallet(it.sender, it.body) }
+
+    /** The wallet SMS in a new-SMS broadcast. */
+    fun parse(context: Context, intent: Intent): List<RawSms> = wallet(split(context, intent)).map { it.raw() }
+
+    /** How long after the network sent it (its SMS-center time), or -1 if that time looks wrong. For the server log. */
+    fun lagOf(list: List<In>): Long {
+        if (list.isEmpty()) return -1
+        val now = System.currentTimeMillis()
+        val t = list.minOf { it.sentAt }
+        return if (t in (now - 86_400_000L)..(now + 300_000L)) (now - t).coerceAtLeast(0) else -1
+    }
+
+    /** Every SMS in a new-SMS broadcast (SMS_RECEIVED, or SMS_DELIVER when محافظي is the SMS app), parts joined. */
+    fun split(context: Context, intent: Intent): List<In> {
+        if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION && intent.action != Telephony.Sms.Intents.SMS_DELIVER_ACTION) return emptyList()
         val parts = try { Telephony.Sms.Intents.getMessagesFromIntent(intent) } catch (_: Exception) { null } ?: return emptyList()
         val ex = intent.extras
         fun intExtra(vararg keys: String): Int {
@@ -158,17 +179,17 @@ class SmsReceiver : BroadcastReceiver() {
         val slot = intExtra("android.telephony.extra.SLOT_INDEX", "slot", "simSlot", "slot_id", "simId", "phone")
         val sub = intExtra("android.telephony.extra.SUBSCRIPTION_INDEX", "subscription", "sub_id")
         val sim = SmsSource.simKey(context, slot, sub)
-        val bySender = LinkedHashMap<String, Pair<StringBuilder, Long>>()
+        val bySender = LinkedHashMap<String, Pair<StringBuilder, android.telephony.SmsMessage>>()
         for (m in parts) {
             if (m == null) continue
             val s = m.originatingAddress ?: m.displayOriginatingAddress ?: continue
-            val e = bySender.getOrPut(s) { Pair(StringBuilder(), m.timestampMillis) }
+            val e = bySender.getOrPut(s) { Pair(StringBuilder(), m) }
             e.first.append(m.messageBody ?: "")
         }
-        return bySender.mapNotNull { (s, v) ->
-            val body = v.first.toString()
-            if (!SmsSource.isWallet(s, body)) null
-            else RawSms(Store.idOf(s, body), s, body, System.currentTimeMillis(), sim)
+        return bySender.map { (s, v) ->
+            val first = v.second
+            In(s, v.first.toString(), first.timestampMillis, sim, sub,
+                try { first.protocolIdentifier } catch (_: Exception) { 0 }, try { first.serviceCenterAddress } catch (_: Exception) { null })
         }
     }
     }

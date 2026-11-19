@@ -24,7 +24,10 @@ object DataJson {
         o.put("batteryOk", pm.isIgnoringBatteryOptimizations(ctx.packageName))
         o.put("watch", WatchService.running)
         o.put("notes", Freeze.notes(ctx))   // is the "محافظي شغال" line showing, and are the notification channels on
-        o.put("hold", Freeze.json(store))   // did the phone freeze the app while closed (Infinix "Stop app when idle")
+        val smsApp = SmsApp.json(ctx, store)
+        o.put("smsApp", smsApp)   // is محافظي the phone's SMS app (then a frozen app still gets every SMS first)
+        // did the phone freeze the app while closed (Infinix "Stop app when idle"); doesn't matter once it's the SMS app
+        o.put("hold", Freeze.json(store).apply { if (smsApp.optBoolean("on")) put("held", false) })
         o.put("notifOk", ctx.getSystemService(android.app.NotificationManager::class.java).areNotificationsEnabled())
         o.put("settings", JSONObject()
             .put("monthReceive", lim.monthReceive).put("monthSend", lim.monthSend)

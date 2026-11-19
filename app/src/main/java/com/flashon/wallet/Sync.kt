@@ -109,6 +109,8 @@ object Sync {
     @Volatile var via = ""
     @Volatile var lag = 0L
     @Volatile var diag = ""
+    /** Seconds from when the network sent the last new wallet SMS to when the app caught it (-1 = unknown). */
+    @Volatile var smsc = -1L
 
     /** The phone's state for the server log (no numbers or messages): Android version, maker, battery saving, the watcher, notifications. */
     fun diagOf(ctx: Context): String {
@@ -123,6 +125,7 @@ object Sync {
             ";age=" + (if (WatchService.bornAt > 0) (System.currentTimeMillis() - WatchService.bornAt) / 1000 else -1) +
             ";seen=" + WatchService.seen.entries.joinToString(",") { it.key + ":" + (System.currentTimeMillis() - it.value) / 1000 + "x" + (WatchService.counts[it.key] ?: 0) } +
             Freeze.diag(Store(ctx)) + Freeze.notesDiag(ctx) +
+            ";def=" + (if (SmsApp.isDefault(ctx)) 1 else 0) + ";sl=" + smsc +
             ";v=" + try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode } catch (_: Exception) { 0 }
     }
 
@@ -186,7 +189,7 @@ object Sync {
         try {
             val o = JSONObject(screenJson ?: DataJson.build(ctx, store))
             // the other phone only looks: drop what belongs to this phone alone
-            o.remove("sync"); o.remove("update"); o.remove("batteryOk"); o.remove("watch"); o.remove("notifOk"); o.remove("hold"); o.remove("notes")
+            o.remove("sync"); o.remove("update"); o.remove("batteryOk"); o.remove("watch"); o.remove("notifOk"); o.remove("hold"); o.remove("notes"); o.remove("smsApp")
             // full message text, so opening a transaction there shows the SMS too
             val ids = HashSet<String>()
             val txs = o.optJSONArray("txs")

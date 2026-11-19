@@ -116,11 +116,11 @@ class WatchService : Service() {
         val r = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 saw("watch")
-                val list = SmsReceiver.parse(context, intent)
-                if (list.isEmpty()) return
+                val ins = SmsReceiver.wallet(SmsReceiver.split(context, intent))
+                if (ins.isEmpty()) return
                 // goAsync keeps the phone awake until the send is done (a plain post let it fall asleep first)
                 val pending = goAsync()
-                Thread { try { SmsSource.deliver(context, list, "watch") } catch (_: Exception) { } finally { pending.finish() } }.start()
+                Thread { try { SmsSource.deliver(context, ins.map { it.raw() }, "watch", SmsReceiver.lagOf(ins)) } catch (_: Exception) { } finally { pending.finish() } }.start()
             }
         }
         val f = IntentFilter(Telephony.Sms.Intents.SMS_RECEIVED_ACTION).apply { priority = 999 }
@@ -201,6 +201,8 @@ class TickReceiver : BroadcastReceiver() {
             val app = ctx.applicationContext
             val am = app.getSystemService(AlarmManager::class.java) ?: return
             val pi = PendingIntent.getBroadcast(app, 3, Intent(app, TickReceiver::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            // محافظي is the SMS app: every SMS reaches it anyway, so no ⏰ every minute (it didn't get past the freeze either)
+            if (SmsApp.isDefault(app)) { try { am.cancel(pi) } catch (_: Exception) { }; return }
             val at = System.currentTimeMillis() + EVERY
             Store(app).putLong("tick_at", at)
             try {

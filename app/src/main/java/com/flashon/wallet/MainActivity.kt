@@ -30,8 +30,16 @@ class MainActivity : Activity() {
     companion object {
         private var current: WeakReference<MainActivity>? = null
         fun refreshIfOpen() { current?.get()?.reloadUi() }
+        /** An SMS came or went out while محافظي is the SMS app: the messages screens reload. */
+        fun smsChanged() { current?.get()?.js("window.App&&App.onSmsChanged&&App.onSmsChanged()") }
+        /** The conversation on the screen right now (no notification for it). */
+        @Volatile private var viewingThread = ""
+        @Volatile private var resumed = false
+        fun viewing(thread: Long) = resumed && thread > 0 && viewingThread == thread.toString()
         private const val REQ_SMS = 11
         private const val REQ_NOTE = 12
+        private const val REQ_ROLE = 13
+        private const val REQ_CONTACTS = 14
     }
 
     private lateinit var web: WebView
@@ -39,6 +47,36 @@ class MainActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
     private var downloadId = -1L
     private var ready = false
+    /** A conversation to open once the screens are loaded (from a notification, or another app's "send SMS"). */
+    private var pendingChat: JSONObject? = null
+
+    fun js(code: String) { main.post { if (::web.isInitialized) web.evaluateJavascript(code, null) } }
+
+    /** What conversation an intent asks for: a notification of ours, or sms:/smsto: from another app. */
+    private fun chatFrom(i: Intent?): JSONObject? {
+        if (i == null) return null
+        if (i.action == SmsApp.ACTION_CHAT) {
+            val t = i.getLongExtra("thread", -1)
+            return JSONObject().put("id", if (t > 0) t.toString() else "").put("addr", i.getStringExtra("addr") ?: "").put("body", "")
+        }
+        if (i.action != Intent.ACTION_SENDTO && i.action != Intent.ACTION_SEND && i.action != Intent.ACTION_VIEW) return null
+        val d = i.data ?: return null
+        if (d.scheme?.lowercase() !in setOf("sms", "smsto", "mms", "mmsto")) return null
+        var to = d.schemeSpecificPart ?: ""
+        var body = i.getStringExtra("sms_body") ?: i.getStringExtra(Intent.EXTRA_TEXT) ?: ""
+        val q = to.indexOf('?')
+        if (q >= 0) {
+            val query = to.substring(q + 1)
+            to = to.substring(0, q)
+            if (body.isEmpty()) Regex("(?:^|&)body=([^&]*)").find(query)?.let { body = Uri.decode(it.groupValues[1]) }
+        }
+        val addr = to.removePrefix("//").split(',', ';').map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: ""
+        return JSONObject().put("id", "").put("addr", addr).put("body", body)
+    }
+
+    private fun openChat(c: JSONObject) {
+        if (ready) js("window.App&&App.openChat(" + JSONObject.quote(c.toString()) + ")") else pendingChat = c
+    }
 
     private val downloadDone = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -66,11 +104,15 @@ class MainActivity : Activity() {
         web.overScrollMode = WebView.OVER_SCROLL_NEVER
         web.webChromeClient = WebChromeClient()
         web.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView?, url: String?) { ready = true }
+            override fun onPageFinished(view: WebView?, url: String?) {
+                ready = true
+                pendingChat?.let { pendingChat = null; openChat(it) }
+            }
         }
         web.addJavascriptInterface(Bridge(), "Android")
         setContentView(web)
         web.loadUrl("file:///android_asset/web/index.html")
+        pendingChat = chatFrom(intent)
 
         val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
         if (Build.VERSION.SDK_INT >= 33) {
@@ -94,8 +136,20 @@ class MainActivity : Activity() {
         requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTE)
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        chatFrom(intent)?.let { openChat(it) }
+    }
+
+    override fun onPause() {
+        resumed = false
+        super.onPause()
+    }
+
     override fun onResume() {
         super.onResume()
+        resumed = true
         // pick up anything missed while the app was closed, then redraw
         WatchService.start(this)
         askNotifications()
@@ -152,8 +206,28 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Back from Android's "make محافظي the SMS app?" question. */
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_ROLE) return
+        roleAnswered()
+    }
+
+    private fun roleAnswered() {
+        val ok = SmsApp.isDefault(this)
+        if (ok) {
+            TickReceiver.next(this)   // stops the ⏰ every minute
+            // names instead of numbers in the messages screen
+            if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQ_CONTACTS)
+        }
+        reloadUi()
+        js("window.App&&App.onSmsApp&&App.onSmsApp($ok)")
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_CONTACTS) { smsChanged(); return }
         if (requestCode == REQ_NOTE) { WatchService.start(this); reloadUi(); return }   // shows the "محافظي شغال" line now
         if (requestCode == REQ_SMS) {
             if (!SmsSource.hasPermission(this)) {
@@ -165,6 +239,12 @@ class MainActivity : Activity() {
                 Notifier.check(this, store)
                 reloadUi()
             }.start()
+        }
+    }
+
+    private fun openDefaultAppsNow() {
+        for (i in listOf(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS), Intent(Settings.ACTION_SETTINGS))) {
+            try { startActivity(i); return } catch (_: Exception) { }
         }
     }
 
@@ -365,6 +445,65 @@ class MainActivity : Activity() {
                 }
                 try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: Exception) { }
             }
+        }
+
+        /** Android's question "make محافظي the SMS app?" (the fix for a phone that freezes it). */
+        @JavascriptInterface
+        fun askSmsApp() {
+            main.post {
+                if (SmsApp.isDefault(this@MainActivity)) { roleAnswered(); return@post }
+                val i = SmsApp.requestIntent(this@MainActivity)
+                try {
+                    if (i == null) throw IllegalStateException()
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(i, REQ_ROLE)
+                } catch (_: Exception) {
+                    openDefaultAppsNow()
+                    js("window.App&&App.onSmsApp&&App.onSmsApp(false)")
+                }
+            }
+        }
+
+        /** The phone's default apps page (pick the SMS app by hand, or go back to the old one). */
+        @JavascriptInterface
+        fun openDefaultApps() { main.post { openDefaultAppsNow() } }
+
+        /** The app's info page: from there ⋮ → "Allow restricted settings" when Android blocks the SMS app question. */
+        @JavascriptInterface
+        fun openAppInfo() {
+            main.post { try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: Exception) { } }
+        }
+
+        /** Conversations, arrives through App.onThreads. */
+        @JavascriptInterface
+        fun loadThreads() {
+            Thread {
+                val j = try { SmsApp.threads(this@MainActivity, store).toString() } catch (_: Exception) { "{\"threads\":[],\"unread\":0}" }
+                js("window.App&&App.onThreads(" + JSONObject.quote(j) + ")")
+            }.start()
+        }
+
+        /** One conversation (marked read), arrives through App.onChat. */
+        @JavascriptInterface
+        fun loadChat(id: String, addr: String) {
+            viewingThread = id
+            Thread {
+                val j = try { SmsApp.chat(this@MainActivity, store, id.toLongOrNull() ?: -1L, addr) } catch (_: Exception) { null } ?: return@Thread
+                if (viewingThread == id || viewingThread.isEmpty()) viewingThread = j.optString("id")
+                js("window.App&&App.onChat(" + JSONObject.quote(j.toString()) + ")")
+            }.start()
+        }
+
+        /** Which conversation is on the screen ("" = none). */
+        @JavascriptInterface
+        fun viewing(id: String) { viewingThread = id }
+
+        @JavascriptInterface
+        fun sendSms(addr: String, text: String, sub: Int) {
+            Thread {
+                val ok = try { SmsApp.send(this@MainActivity, addr, text, sub) } catch (_: Exception) { false }
+                js("window.App&&App.onSent($ok)")
+            }.start()
         }
 
         /** The app's notification settings (when the permission was refused for good, only from there). */

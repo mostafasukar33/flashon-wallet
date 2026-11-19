@@ -101,8 +101,32 @@ h2{margin:0;font-size:16px;font-weight:700}
 #sheet .handle{width:44px;height:5px;border-radius:3px;background:#C9CCC5;margin:10px auto 0}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:10px;padding:10px 16px;font-size:14px;z-index:20;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.show{opacity:1}
+body.chatting .toast{bottom:92px}
 .logo{width:96px;height:96px;border-radius:24px;align-self:center}
 html.view [data-act=settings],html.view [data-act=dl],html.view [data-act=rename],html.view [data-act=accname],html.view .fix{display:none!important}
+.icon-btn{position:relative}
+.badge{position:absolute;top:-6px;left:-6px;min-width:20px;height:20px;border-radius:10px;background:#C62828;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;line-height:1}
+.th{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px;width:100%;text-align:right}
+.th .av{width:42px;height:42px;border-radius:50%;background:#E4ECF7;color:var(--blue);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;flex:none}
+.th .mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.th .nm{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th .sn{font-size:13px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th.un .nm,.th.un .sn{font-weight:700;color:var(--ink)}
+.th .side{display:flex;flex-direction:column;align-items:flex-start;gap:4px;flex:none}
+.th .cnt{background:var(--blue);color:#fff;border-radius:10px;min-width:20px;height:20px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 6px}
+.chat{display:flex;flex-direction:column;gap:6px;padding-bottom:84px}
+.bub{max-width:84%;padding:8px 12px;border-radius:14px;font-size:15px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.bub.r{align-self:flex-start;background:#fff;border:1px solid var(--line);border-start-start-radius:4px}
+.bub.s{align-self:flex-end;background:#DCE8F8;border-start-end-radius:4px}
+.bub .tm{display:block;font-size:11px;color:var(--mute);margin-top:2px;text-align:end}
+.bub .tm.bad{color:var(--bad-ink);font-weight:700}
+.compose{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:8px 12px calc(8px + env(safe-area-inset-bottom));z-index:8}
+.compose .in3{max-width:560px;margin:0 auto;display:flex;gap:8px;align-items:flex-end}
+.compose textarea{flex:1;min-width:0;min-height:48px;max-height:140px;border:1px solid var(--line2);border-radius:12px;padding:11px 12px;font:inherit;font-size:16px;line-height:1.5;resize:none;background:#fff;color:var(--ink)}
+.compose button{min-height:48px;border:0;border-radius:12px;background:var(--blue);color:#fff;font-weight:700;font-size:16px;padding:0 18px;flex:none}
+.field input[type=tel]{border:1px solid var(--line2);border-radius:10px;min-height:48px;padding:0 12px;font-size:17px;background:#fff;width:100%}
+details.old{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+details.old summary{font-weight:700;font-size:15px;min-height:32px;cursor:pointer}
 .linkbox{direction:ltr;text-align:left;font-size:13px;word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;color:var(--ink2)}
 </style>
 </head>
@@ -122,7 +146,7 @@ var VIEW = !!(B && B.viewOnly);
 if (VIEW) document.documentElement.classList.add('view');
 if (!B) {
   var mock = {
-    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:true, notifOk:true, watch:true, notes:{line:false,watch:3,tx:0,limits:4},hold:{n:3,at:Date.now()-120000,gap:540000,best:0,proven:1200000,held:true,missAt:Date.now()-120000,missLag:511000,tr:true}, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
+    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:true, notifOk:true, watch:true, notes:{line:false,watch:3,tx:0,limits:4},hold:{n:3,at:Date.now()-120000,gap:33928000,best:0,proven:1200000,held:true,missAt:Date.now()-120000,missLag:511000,tr:true}, smsApp:{on:false,can:true,at:0,unread:0}, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
     settings:{monthReceive:200000,monthSend:200000,daySend:60000,dayReceiveOn:false,dayReceive:60000,feesCount:true},
     update:{available:true,version:'2'},
     months:['2026-10'],
@@ -158,6 +182,19 @@ if (!B) {
     rescan:function(){setTimeout(App.reload,300)},
     checkUpdate:function(){setTimeout(function(){App.onUpdate(JSON.stringify(mock.update))},400)},
     downloadUpdate:function(){toast('بينزل التحديث…')},
+    askSmsApp:function(){mock.smsApp={on:true,can:true,at:Date.now(),unread:2};mock.hold.held=false;setTimeout(function(){App.reload();App.onSmsApp(true)},300)},
+    openAppInfo:function(){toast('بيفتح معلومات التطبيق…')},
+    openDefaultApps:function(){toast('بيفتح التطبيقات الافتراضية…')},
+    viewing:function(){},
+    loadThreads:function(){setTimeout(function(){App.onThreads(JSON.stringify({unread:2,threads:[
+      {id:'1',addr:'VF-Cash',name:null,snippet:'تم استلام مبلغ 7000 جنيه من رقم 01018064481 المسجل بإسم Mahmoud A Hemdan',time:Date.now()-60000,out:false,unread:1},
+      {id:'2',addr:'+201018064481',name:'محمود',snippet:'تمام يا باشا وصلت',time:Date.now()-3600000,out:true,unread:0},
+      {id:'3',addr:'CIB',name:null,snippet:'Your OTP is 482913. Do not share it with anyone.',time:Date.now()-86400000*2,out:false,unread:1}]}))},150)},
+    loadChat:function(id,addr){setTimeout(function(){App.onChat(JSON.stringify({id:id||'9',addr:addr||'+201018064481',name:addr?null:'محمود',sub:3,unread:0,msgs:[
+      {id:1,body:'السلام عليكم، حولتلك 7000',time:Date.now()-7200000,out:false,st:0},
+      {id:2,body:'تمام يا باشا وصلت',time:Date.now()-3600000,out:true,st:0},
+      {id:3,body:'تمام شكراً 👍',time:Date.now()-60000,out:true,st:2}]}))},150)},
+    sendSms:function(a,t){setTimeout(function(){App.onSent(true)},300)},
     exitApp:function(){}
   };
 }
@@ -183,6 +220,7 @@ function wname(w){ return accLabel(w).replace(' كاش',''); }
 function nowOf(w){ return D.now.filter(function(x){return x.w===w})[0]; }
 var ICON = {
   gear:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  msg:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>',
   search:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#555A60" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
   inA:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0B6B3F" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"/><path d="M6 13l6 6 6-6"/></svg>',
   outA:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A33A1E" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>'
@@ -197,15 +235,21 @@ function go(screen, extra){ S.stack.push({screen:S.screen,wallet:S.wallet,phone:
 function back(){
   if (document.getElementById('sheet').classList.contains('open')) { closeSheet(); return true; }
   var p=S.stack.pop(); if(!p) return false;
-  S.screen=p.screen; S.wallet=p.wallet; S.phone=p.phone; render(); window.scrollTo(0,p.scroll||0); return true;
+  S.screen=p.screen; S.wallet=p.wallet; S.phone=p.phone; render(); window.scrollTo(0,p.scroll||0);
+  if (S.screen==='sms' && B.loadThreads) B.loadThreads();
+  return true;
 }
 
 /* ---------- screens ---------- */
 function render(){
   if (!D) return;
   if (!D.permission) { $app.innerHTML = onboarding(); return; }
-  var h = S.screen==='limits'?limitsScreen(): S.screen==='person'?personScreen(): S.screen==='unknown'?unknownScreen(): S.screen==='settings'?settingsScreen(): home();
+  if ((S.screen==='sms'||S.screen==='chat') && !smsOn()) { S.screen='home'; S.stack=[]; }
+  var h = S.screen==='limits'?limitsScreen(): S.screen==='person'?personScreen(): S.screen==='unknown'?unknownScreen(): S.screen==='settings'?settingsScreen():
+    S.screen==='sms'?smsScreen(): S.screen==='chat'?chatScreen(): home();
   $app.innerHTML = h;
+  if (B.viewing) B.viewing(S.screen==='chat'?String(S.chatId||''):'');
+  document.body.classList.toggle('chatting', S.screen==='chat');
   fillTopbar(); watchCards();
   var q=document.getElementById('q'); if(q){ q.value=S.q; }
 }
@@ -275,6 +319,7 @@ function home(){
   var opts=D.months.map(function(m){return '<option value="'+m+'"'+(m===S.month?' selected':'')+'>'+monthName(m)+'</option>'}).join('');
   h+='<div class="row"><h1>محافظي</h1><div class="row" style="gap:8px">'+
      '<select class="pill" id="month" aria-label="الشهر">'+opts+'</select>'+
+     (smsOn()?'<button class="icon-btn" data-act="sms" aria-label="الرسايل">'+ICON.msg+(D.smsApp.unread?'<span class="badge num">'+(D.smsApp.unread>99?'99+':D.smsApp.unread)+'</span>':'')+'</button>':'')+
      '<button class="icon-btn" data-act="settings" aria-label="الإعدادات">'+ICON.gear+'</button></div></div>';
 
   // ---- what you can send right now, all wallets together ----
@@ -289,8 +334,8 @@ function home(){
       (locked>0.5?'<div class="lock">'+fmt(locked)+' ج هيتقفلوا للشهر الجاي</div>':'')+'</div>';
   }
   if (!VIEW && held()) h+='<div class="alert bad" style="gap:8px"><b>⚠️ الموبايل جمّد التطبيق '+dur(D.hold.gap)+' وهو مقفول</b>'+
-    '<span style="line-height:1.7">علشان كده التحويل اتأخر ومراحش الآيفون غير لما فتحت التطبيق.</span>'+
-    '<button class="btn main" data-act="fixhold">التفاصيل والإعدادات</button></div>';
+    '<span style="line-height:1.7">علشان كده التحويل اتأخر ومراحش الآيفون غير لما فتحت التطبيق.'+(smsCan()?' وفيه حل قطعي ليها.':'')+'</span>'+
+    '<button class="btn main" data-act="fixhold">'+(smsCan()?'الحل القطعي':'التفاصيل والإعدادات')+'</button></div>';
   if (!VIEW && notesOff()) h+='<div class="minibat"><span>إشعارات التطبيق مقفولة أو مستخبية، فمفيش إشعار بالتحويلات هنا</span><button data-act="notif">شغّلها</button></div>';
   else if (!VIEW && !D.batteryOk) h+='<div class="minibat"><span>اسمح للتطبيق يشتغل في الخلفية عشان ميفوتش رسايل</span><button data-act="battery">اسمحله</button></div>';
 
@@ -468,6 +513,7 @@ function settingsScreen(){
     '<div class="grid2"><select id="ex_m" class="pill" style="min-height:48px;border-radius:10px">'+mo+'</select><select id="ex_w" class="pill" style="min-height:48px;border-radius:10px">'+wo+'</select></div>'+
     '<button class="btn ghost" data-act="export">اعمل الملف وابعته</button><span class="xs mute" style="line-height:1.6">ملف بيتفتح على Excel، تقدر تبعته واتساب أو إيميل أو تحفظه على Drive.</span></div>';
 
+  if (smsOn()||smsCan()) h+='<div class="card col" style="gap:10px"><h2>تطبيق الرسايل</h2>'+(smsOn()?smsOnBox(true):smsAppBox())+'</div>';
   h+='<div class="card col" style="gap:10px"><h2>التشغيل في الخلفية</h2>'+bgState()+'</div>';
   h+='<div class="card col" style="gap:10px"><h2>الرسايل</h2><span class="small mute" style="line-height:1.7">لو حاسس إن فيه عملية ناقصة، خلي التطبيق يقرا كل الرسايل من الأول.</span><button class="btn ghost" data-act="rescan">اقرا الرسايل من جديد</button></div>';
   h+='<div class="card col" style="gap:10px"><h2>التطبيق</h2><span class="small mute">النسخة '+esc(D.version)+'</span><button class="btn ghost" data-act="chkupd">شوف فيه تحديث</button></div>';
@@ -486,11 +532,13 @@ function dur(ms){
 }
 function bgState(){
   var H=D.hold||{};
+  if (smsOn()) return '<span class="small mute" style="line-height:1.7">«محافظي» هو تطبيق الرسايل، فأي رسالة بتوصله الأول حتى لو الموبايل جمّده، ومن غير المنبّه ⏰ اللي كان كل دقيقة. السطر «💰 محافظي شغال» لسه موجود احتياطي.</span>';
   if (held()) {
     return '<div class="alert bad"><b>⚠️ الموبايل جمّد التطبيق '+dur(H.gap)+' وهو مقفول</b>'+
       '<span style="line-height:1.7">آخر مرة '+dayF.format(new Date(H.at))+' الساعة '+timeF.format(new Date(H.at))+(H.n>1?'، واتكررت '+times(H.n):'')+'.'+
       (H.missLag?' وآخر تحويل وصل التطبيق بعد '+dur(H.missLag)+' من وصول الرسالة.':'')+
-      ' وهو متجمّد مفيش أي حاجة في التطبيق بتشتغل، ولا حتى استقبال الرسايل، لحد ما تفتحه.</span></div>'+holdSteps();
+      ' وهو متجمّد مفيش أي حاجة في التطبيق بتشتغل، ولا حتى استقبال الرسايل، لحد ما تفتحه.'+(smsCan()?' الحل القطعي في «تطبيق الرسايل» اللي فوق.':'')+'</span></div>'+
+      (smsCan()?'<details class="old"><summary>أو الإعدادات (مش مضمونة على الموبايل ده)</summary>'+oldSteps()+'</details>':oldSteps());
   }
   if (H.at) {
     return '<div class="alert good"><b>✓ اتصلحت</b><span style="line-height:1.7">التطبيق فضل صاحي '+dur(H.best)+' والشاشة مقفولة من غير ما الموبايل يجمّده، فالتحويل بيوصل الآيفون في نفس اللحظة.</span></div>'+
@@ -498,10 +546,38 @@ function bgState(){
   }
   return '<span class="small mute" style="line-height:1.7">التطبيق شغال ومستني التحويلات (علشان كده فيه سطر «💰 محافظي شغال» ثابت فوق). وبيراقب نفسه: لو الموبايل جمّده وهو مقفول هيظهرلك تنبيه أحمر على طول.</span>'+ALARM+bgBtns();
 }
-function holdSteps(){
-  var H=D.hold||{}, tr=!!H.tr;
+function smsOn(){ return !VIEW && !!(D && D.smsApp && D.smsApp.on); }
+function smsCan(){ return !VIEW && !!(D && D.smsApp && D.smsApp.can && !D.smsApp.on); }
+function smsOnBox(more){
+  return '<div class="alert good"><b>✓ «محافظي» هو تطبيق الرسايل</b><span style="line-height:1.7">أندرويد بيدّي أي رسالة لتطبيق الرسايل الأول علشان يحفظها، والموبايل مبيقدرش يمنعها عنه حتى لو جمّده. فالتحويل بيروح الآيفون أول ما الرسالة توصل.</span></div>'+
+    '<button class="btn ghost" data-act="sms">افتح الرسايل</button>'+
+    (more?'<button class="btn ghost" data-act="defapps">رجّع تطبيق الرسايل القديم</button><span class="xs mute" style="line-height:1.6">هتفتح «التطبيقات الافتراضية»: اختار «تطبيق الرسايل» وبعدين التطبيق القديم. كل الرسايل هتلاقيها فيه، بس الموبايل هيرجع يجمّد «محافظي» والتحويل يتأخر تاني.</span>':'');
+}
+function smsAppBox(){
+  var H=D.hold||{};
   return '<div class="col" style="gap:8px;line-height:1.7">'+
-    '<span class="small">التطبيق بقى بيصحّي نفسه كل دقيقة بمنبّه من نوع «المنبّه» (علامة ⏰ فوق)، وده النوع اللي إنفينكس المفروض يسيبه يوصل للتطبيق حتى وهو متجمّد. واتأكد كمان إن الإعدادات دي كلها مظبوطة:</span>'+
+    '<b style="font-size:16px">الحل القطعي: خلّي «محافظي» تطبيق الرسايل</b>'+
+    '<span class="small">الموبايل ده بيجمّد أي تطبيق مقفول مهما عملنا: جرّبنا الخدمة الشغالة على طول، ومن غير توفير بطارية، والمنبّه كل دقيقة'+(H.gap>3600000?'، وبرضو فضل متجمّد '+dur(H.gap):'')+'. الحاجة الوحيدة اللي مبيقدرش يجمّدها هي تطبيق الرسايل، لأن أندرويد لازم يديله كل رسالة أول ما توصل علشان يحفظها، وإلا الرسايل تضيع.</span>'+
+    '<span class="small">فلما «محافظي» يبقى تطبيق الرسايل، أي تحويل بيروح الآيفون في نفس اللحظة حتى لو الموبايل مقفول بقاله ساعات.</span>'+
+    '<button class="btn main" data-act="smsapp">خليه تطبيق الرسايل</button>'+
+    '<span class="xs mute" style="line-height:1.6">هيظهرلك سؤال من أندرويد: اختار «محافظي» ودوس «تعيين كافتراضي» '+en('Set as default')+'.</span>'+
+    '<div class="col xs mute" style="gap:4px;line-height:1.6">'+
+      '<span>• كل رسايلك هتلاقيها في «محافظي» من زرار الرسايل 💬 فوق، وتقدر ترد منه، وكل رسالة بيجيلك عليها إشعار.</span>'+
+      '<span>• الرسايل القديمة زي ما هي، ولو رجعت لتطبيق الرسايل القديم هتلاقي كل حاجة فيه، حتى اللي وصلت وانت على «محافظي».</span>'+
+      '<span>• رسايل الصور والفيديو (MMS) مبتتفتحش فيه.</span>'+
+      '<span>• ترجع في أي وقت من الإعدادات ← التطبيقات الافتراضية ← تطبيق الرسايل.</span></div>'+
+    (S.smsFail?'<div class="alert mid"><b>لسه مبقاش تطبيق الرسايل</b><span style="line-height:1.7">لو السؤال مظهرش، أو ظهر «إعداد مقيّد» '+en('Restricted setting')+': أندرويد بيقفل الاختيار ده للتطبيقات اللي متسطبة من برا المتجر. افتح «معلومات التطبيق»، دوس على النقط التلاتة ⋮ فوق، واختار «السماح بالإعدادات المقيدة» '+en('Allow restricted settings')+'، وارجع دوس «خليه تطبيق الرسايل» تاني.</span>'+
+      '<button class="btn ghost" data-act="appinfo">افتح معلومات التطبيق</button><button class="btn ghost" data-act="defapps">أو اختاره بنفسك من التطبيقات الافتراضية</button></div>':'')+
+    '</div>';
+}
+function holdSteps(){
+  if (smsOn()) return smsOnBox(false);
+  return (smsCan()?smsAppBox()+'<details class="old"><summary>أو الإعدادات (مش مضمونة على الموبايل ده)</summary>'+oldSteps()+'</details>':oldSteps());
+}
+function oldSteps(){
+  var H=D.hold||{}, tr=!!H.tr;
+  return '<div class="col" style="gap:8px;line-height:1.7;margin-top:8px">'+
+    '<span class="small">التطبيق بيصحّي نفسه كل دقيقة بمنبّه من نوع «المنبّه» (علامة ⏰ فوق). واتأكد كمان إن الإعدادات دي كلها مظبوطة:</span>'+
     (notesOff()?'<button class="btn ghost" data-act="notif">شغّل إشعارات التطبيق</button><span class="xs mute">شغّل «السماح بالإشعارات» وكل الأنواع اللي تحتها، ومن ضمنها «محافظي شغال» و«العمليات».</span>':'')+
     (D.batteryOk===false?'<button class="btn ghost" data-act="battery">من غير توفير بطارية</button><span class="xs mute">دوس «سماح» (Allow).</span>':'')+
     '<b>1. صفحة البطارية بتاعة «محافظي» (دي الأهم)</b>'+
@@ -536,6 +612,68 @@ function syncOn(){
   var i=document.getElementById('sy_pw'), pw=i?i.value:'';
   if (pw.length<6) { toast('الباسورد لازم 6 على الأقل'); if(i) i.focus(); return; }
   closeSheet(); B.setSync(true, pw); toast('بيعمل اللينك…');
+}
+
+/* ---------- messages (when محافظي is the SMS app) ---------- */
+var SMS={threads:null, chat:null};
+function isNumName(n){ return /^[0-9+ ]+$/.test(n||''); }
+function avatar(n){ var c=String(n||'').trim().charAt(0); return (!c||/[0-9+]/.test(c))?'#':c.toUpperCase(); }
+function whenF(t){ var d=new Date(t); return dayKey(t)===dayKey(Date.now())?timeF.format(d):shortF.format(d); }
+function smsScreen(){
+  var h='<div class="wrap"><button class="back" data-act="back">→ رجوع</button><div class="row"><h1>الرسايل</h1><button class="pill" data-act="newchat">رسالة جديدة</button></div>';
+  if (!SMS.threads) return h+'<div class="empty">لحظة…</div></div>';
+  if (!SMS.threads.length) return h+'<div class="empty">مفيش رسايل</div></div>';
+  return h+'<div class="col" style="gap:8px">'+SMS.threads.map(function(t){
+    var nm=t.name||t.addr;
+    return '<button class="th'+(t.unread?' un':'')+'" data-act="chat" data-id="'+esc(t.id)+'" data-a="'+esc(t.addr)+'">'+
+      '<span class="av">'+esc(avatar(nm))+'</span>'+
+      '<span class="mid"><span class="nm'+(isNumName(nm)?' num':'')+'" style="text-align:right">'+esc(nm)+'</span>'+
+      '<span class="sn" dir="auto" style="text-align:right">'+(t.out?'انت: ':'')+esc(t.snippet)+'</span></span>'+
+      '<span class="side"><span class="xs mute">'+whenF(t.time)+'</span>'+(t.unread?'<span class="cnt num">'+t.unread+'</span>':'')+'</span></button>';
+  }).join('')+'</div></div>';
+}
+function chatHead(){
+  var c=SMS.chat, nm=c?(c.name||c.addr):(S.chatAddr||'');
+  if (!nm) return '<h1>رسالة جديدة</h1><div class="field"><label for="smsTo">لـ</label><input type="tel" id="smsTo" class="num" dir="ltr" style="text-align:left" placeholder="01xxxxxxxxx" value="'+esc(S.toDraft||'')+'"></div>';
+  return '<h1 class="'+(isNumName(nm)?'num':'')+'" style="text-align:right">'+esc(nm)+'</h1>'+(c&&c.name&&c.addr?'<span class="num mute small" style="text-align:right">'+esc(c.addr)+'</span>':'');
+}
+function chatBody(){
+  var c=SMS.chat;
+  if (!c) return (S.chatId||S.chatAddr)?'<div class="empty">لحظة…</div>':'';
+  if (!c.msgs.length) return '<div class="empty">مفيش رسايل لسه</div>';
+  var out='', last='';
+  c.msgs.forEach(function(m){
+    var k=dayKey(m.time); if(k!==last){ out+='<div class="day" style="text-align:center">'+dayF.format(new Date(m.time))+'</div>'; last=k; }
+    out+='<div class="bub '+(m.out?'s':'r')+'" dir="auto">'+esc(m.body)+
+      '<span class="tm'+(m.st===2?' bad':'')+'">'+(m.st===1?'بيتبعت…':m.st===2?'⚠️ مبعتتش':timeF.format(new Date(m.time)))+'</span></div>';
+  });
+  return out;
+}
+function chatScreen(){
+  return '<div class="wrap"><button class="back" data-act="back">→ رجوع</button><div class="col" style="gap:2px" id="chatHead">'+chatHead()+'</div>'+
+    '<div class="chat" id="chat">'+chatBody()+'</div></div>'+
+    '<div class="compose"><div class="in3"><textarea id="smsText" rows="1" placeholder="اكتب رسالة" dir="auto" aria-label="الرسالة">'+esc(S.draft||'')+'</textarea>'+
+    '<button data-act="send">ابعت</button></div></div>';
+}
+function drawChat(){
+  var hd=document.getElementById('chatHead'), b=document.getElementById('chat');
+  if (!hd || !b) { render(); }
+  else if (!document.getElementById('smsTo') || SMS.chat) { if (!(document.activeElement && document.activeElement.id==='smsTo')) hd.innerHTML=chatHead(); b.innerHTML=chatBody(); }
+  window.scrollTo(0, document.body.scrollHeight);
+}
+function grow(t){ t.style.height='auto'; t.style.height=Math.min(140, t.scrollHeight+2)+'px'; }
+function sendSms(){
+  var t=document.getElementById('smsText'), text=(t?t.value:'').trim();
+  var to=(SMS.chat&&SMS.chat.addr)||S.chatAddr||((document.getElementById('smsTo')||{}).value||'').trim();
+  if (!to) { toast('اكتب الرقم'); var i=document.getElementById('smsTo'); if(i) i.focus(); return; }
+  if (!text) return;
+  B.sendSms(to, text, SMS.chat&&SMS.chat.sub!=null?SMS.chat.sub:-1);
+  if (!SMS.chat) { SMS.chat={id:'',addr:to,name:null,sub:-1,msgs:[]}; S.chatAddr=to; }
+  SMS.chat.msgs.push({id:0,body:text,time:Date.now(),out:true,st:1});
+  S.draft=''; S.toDraft=''; if (t) { t.value=''; grow(t); }
+  var hd=document.getElementById('chatHead'); if (hd) hd.innerHTML=chatHead();
+  var b=document.getElementById('chat'); if (b) b.innerHTML=chatBody();
+  window.scrollTo(0, document.body.scrollHeight);
 }
 
 /* ---------- sheets ---------- */
@@ -590,7 +728,14 @@ document.addEventListener('click', function(e){
     case 'autostart': if (B.openAutostart) B.openAutostart(); break;
     case 'appbat': if (B.openAppBattery) B.openAppBattery(); else B.openBattery(); break;
     case 'powersave': if (B.openPowerSaving) B.openPowerSaving(); break;
-    case 'fixhold': openSheet('<h2>علشان الموبايل ميجمّدش التطبيق</h2>'+holdSteps()); break;
+    case 'fixhold': openSheet((smsCan()?'':'<h2>'+(smsOn()?'تطبيق الرسايل':'علشان الموبايل ميجمّدش التطبيق')+'</h2>')+holdSteps()); break;
+    case 'smsapp': if (B.askSmsApp) B.askSmsApp(); break;
+    case 'appinfo': if (B.openAppInfo) B.openAppInfo(); break;
+    case 'defapps': if (B.openDefaultApps) B.openDefaultApps(); break;
+    case 'sms': closeSheet(); SMS.threads=null; go('sms'); B.loadThreads(); break;
+    case 'chat': SMS.chat=null; S.draft=''; go('chat',{chatId:el.dataset.id, chatAddr:el.dataset.a}); B.loadChat(el.dataset.id, el.dataset.a); break;
+    case 'newchat': SMS.chat=null; S.draft=''; go('chat',{chatId:'', chatAddr:''}); setTimeout(function(){var i=document.getElementById('smsTo'); if(i) i.focus();},200); break;
+    case 'send': sendSms(); break;
     case 'notif': if (B.openNotif) B.openNotif(); break;
     case 'settings': go('settings'); break;
     case 'back': back(); break;
@@ -657,6 +802,8 @@ function watchCards(){
 document.addEventListener('change', function(e){ if(e.target.id==='month'){ S.month=e.target.value; render(); } if(e.target.id==='s_txn'){ B.setTxNotify(e.target.checked); toast(e.target.checked?'هيجيلك إشعار مع كل عملية':'الإشعارات دي اتقفلت'); } });
 var qT;
 document.addEventListener('input', function(e){
+  if(e.target.id==='smsText'){ S.draft=e.target.value; grow(e.target); return; }
+  if(e.target.id==='smsTo'){ S.toDraft=e.target.value; return; }
   if(e.target.id!=='q') return;
   S.q=e.target.value; clearTimeout(qT);
   qT=setTimeout(function(){ var l=document.getElementById('list'); if(l) l.innerHTML=txList(filteredTx()); },120);
@@ -679,13 +826,45 @@ function applyData(json){
   if (S.screen==='limits' && !nowOf(S.wallet)) { S.screen='home'; S.stack=[]; }
   if (S.screen==='person' && !D.txs.some(function(t){return t.phone===S.phone})) { S.screen='home'; S.stack=[]; }
   // don't redraw under an open sheet or while typing; it would close it / lose the text
-  var typing = document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName);
+  var typing = document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
   if (document.getElementById('sheet').classList.contains('open') || typing) { pending=true; return; }
   var y=window.scrollY; render(); window.scrollTo(0,y);
 }
 var pending=false;
 window.App = {
   reload: function(){ if (B.refresh) B.refresh(); else applyData(B.getData()); },
+  onSmsApp: function(ok){
+    S.smsFail=!ok;
+    if (ok) { closeSheet(); toast('✓ «محافظي» بقى تطبيق الرسايل'); }
+    else if (document.getElementById('sheet').classList.contains('open')) { openSheet(holdSteps()); setTimeout(function(){ var s=document.getElementById('sheet'); s.scrollTo(0, s.scrollHeight); }, 250); }
+    else if (S.screen==='settings') render();
+  },
+  openChat: function(j){
+    var c=JSON.parse(j); SMS.chat=null; S.draft=c.body||'';
+    if (S.screen==='chat') { S.chatId=c.id; S.chatAddr=c.addr; render(); }
+    else go('chat',{chatId:c.id, chatAddr:c.addr});
+    B.loadChat(c.id||'', c.addr||'');
+  },
+  onThreads: function(j){
+    var o=JSON.parse(j); SMS.threads=o.threads; if (D && D.smsApp) D.smsApp.unread=o.unread;
+    if (S.screen==='sms') { var y=window.scrollY; render(); window.scrollTo(0,y); }
+  },
+  onChat: function(j){
+    var c=JSON.parse(j);
+    if (S.screen!=='chat') return;
+    if (S.chatId && c.id && S.chatId!==c.id && S.chatAddr!==c.addr) return;   // an older answer for another conversation
+    SMS.chat=c; S.chatId=c.id; if (c.addr) S.chatAddr=c.addr; if (D && D.smsApp) D.smsApp.unread=c.unread;
+    drawChat();
+  },
+  onSent: function(ok){
+    if (!ok) toast('مقدرتش أبعتها، جرّب تاني');
+    if (S.screen==='chat') B.loadChat(S.chatId||'', S.chatAddr||'');
+  },
+  onSmsChanged: function(){
+    if (S.screen==='sms') B.loadThreads();
+    else if (S.screen==='chat') B.loadChat(S.chatId||'', S.chatAddr||'');
+    else App.reload();
+  },
   setData: function(json){ applyData(json); },
   back: back,
   onUpdate: function(j){
