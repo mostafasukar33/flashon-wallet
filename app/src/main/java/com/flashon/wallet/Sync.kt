@@ -125,7 +125,8 @@ object Sync {
             ";age=" + (if (WatchService.bornAt > 0) (System.currentTimeMillis() - WatchService.bornAt) / 1000 else -1) +
             ";seen=" + WatchService.seen.entries.joinToString(",") { it.key + ":" + (System.currentTimeMillis() - it.value) / 1000 + "x" + (WatchService.counts[it.key] ?: 0) } +
             Freeze.diag(Store(ctx)) + Freeze.notesDiag(ctx) +
-            ";def=" + (if (SmsApp.isDefault(ctx)) 1 else 0) + ";sl=" + smsc +
+            ";def=" + (if (SmsApp.isDefault(ctx)) 1 else 0) + ";sl=" + smsc + ";se=" + (Store(ctx).getStr("sms_last") ?: "") +
+            ";snd=" + (if (ctx.checkSelfPermission(android.Manifest.permission.SEND_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED) 1 else 0) +
             ";v=" + try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode } catch (_: Exception) { 0 }
     }
 

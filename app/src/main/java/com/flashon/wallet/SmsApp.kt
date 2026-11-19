@@ -181,14 +181,54 @@ object SmsApp {
 
     /** The SIM to send on: the conversation's, else the phone's SMS SIM, else the one the last SMS came on. */
     private fun pickSub(ctx: Context, hint: Int): Int {
-        if (hint >= 0) return hint
+        if (valid(hint)) return hint
         val def = try { SmsManager.getDefaultSmsSubscriptionId() } catch (_: Exception) { -1 }
-        if (def != SubscriptionManager.INVALID_SUBSCRIPTION_ID && def >= 0) return def
-        return try {
-            ctx.contentResolver.query(Telephony.Sms.Inbox.CONTENT_URI, arrayOf(Telephony.Sms.SUBSCRIPTION_ID), null, null, Telephony.Sms.DATE + " DESC")?.use { c ->
-                if (c.moveToFirst() && !c.isNull(0)) c.getInt(0) else -1
-            } ?: -1
-        } catch (_: Exception) { -1 }
+        if (valid(def)) return def
+        return subs(ctx).firstOrNull() ?: -1
+    }
+
+    /** A SIM that's in the phone now (an old id from a removed SIM fails every send). */
+    fun valid(sub: Int): Boolean {
+        if (sub < 0 || sub == SubscriptionManager.INVALID_SUBSCRIPTION_ID) return false
+        if (Build.VERSION.SDK_INT >= 29) return try { SubscriptionManager.getSlotIndex(sub) >= 0 } catch (_: Exception) { true }
+        return true
+    }
+
+    /** The SIMs messages came on lately and still in the phone, line 1 first (no phone permission needed). */
+    fun subs(ctx: Context): List<Int> {
+        val seen = LinkedHashSet<Int>()
+        try {
+            ctx.contentResolver.query(Telephony.Sms.CONTENT_URI, arrayOf(Telephony.Sms.SUBSCRIPTION_ID), null, null, Telephony.Sms.DATE + " DESC")?.use { c ->
+                var n = 0
+                while (c.moveToNext() && n++ < 3000) if (!c.isNull(0)) seen += c.getInt(0)
+            }
+        } catch (_: Exception) { }
+        val ok = seen.filter { valid(it) }
+        return if (Build.VERSION.SDK_INT >= 29) ok.sortedBy { try { SubscriptionManager.getSlotIndex(it) } catch (_: Exception) { 9 } } else ok.sorted()
+    }
+
+    private fun markFailed(ctx: Context, rowId: Long, why: String) {
+        try { ctx.contentResolver.update(ContentUris.withAppendedId(Telephony.Sms.CONTENT_URI, rowId), ContentValues().apply { put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_FAILED) }, null, null) } catch (_: Exception) { }
+        noteFail(ctx, rowId, why)
+    }
+
+    /** Why a send failed, by message, for the screen and the server log. */
+    fun noteFail(ctx: Context, rowId: Long, why: String) {
+        val st = Store(ctx)
+        st.putStr("sms_last", why)
+        if (rowId <= 0) return
+        val o = try { JSONObject(st.getStr("sms_fail") ?: "{}") } catch (_: Exception) { JSONObject() }
+        o.put(rowId.toString(), why)
+        val keys = o.keys().asSequence().toList()
+        if (keys.size > 60) for (k in keys.take(keys.size - 60)) o.remove(k)
+        st.putStr("sms_fail", o.toString())
+    }
+
+    fun failOf(ctx: Context): JSONObject = try { JSONObject(Store(ctx).getStr("sms_fail") ?: "{}") } catch (_: Exception) { JSONObject() }
+
+    /** Removes one SMS (a failed one, before sending it again). */
+    fun delete(ctx: Context, id: Long) {
+        try { ctx.contentResolver.delete(ContentUris.withAppendedId(Telephony.Sms.CONTENT_URI, id), null, null) } catch (_: Exception) { }
     }
 
     /** Sends an SMS and keeps it in the conversation (the SMS app has to save what it sends too). Blocking. */
@@ -200,6 +240,7 @@ object SmsApp {
         val sub = pickSub(app, subHint)
         var ok = true
         for (addr in addrs) {
+            var rowId = -1L
             try {
                 val sm = manager(app, sub)
                 val thread = try { Telephony.Threads.getOrCreateThreadId(app, addr) } catch (_: Exception) { -1L }
@@ -215,16 +256,24 @@ object SmsApp {
                         if (thread > 0) put(Telephony.Sms.THREAD_ID, thread)
                     })
                 } catch (_: Exception) { null }
-                val rowId = uri?.lastPathSegment?.toLongOrNull() ?: -1L
+                rowId = uri?.lastPathSegment?.toLongOrNull() ?: -1L
                 val parts = sm.divideMessage(body)
+                // mutable, so the phone can add its error code when it fails (shown on the screen)
+                val mut = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
                 val sent = ArrayList<PendingIntent?>()
                 for (i in parts.indices) sent += if (i == parts.size - 1 && rowId > 0)
                     PendingIntent.getBroadcast(app, (rowId % Int.MAX_VALUE).toInt(),
                         Intent(app, SmsSentReceiver::class.java).setData(ContentUris.withAppendedId(Telephony.Sms.CONTENT_URI, rowId)),
-                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT)
+                        mut or PendingIntent.FLAG_ONE_SHOT)
                 else null
-                sm.sendMultipartTextMessage(addr, null, parts, sent, null)
-            } catch (_: Exception) { ok = false }
+                if (parts.size > 1) sm.sendMultipartTextMessage(addr, null, parts, sent, null)
+                else sm.sendTextMessage(addr, null, body, sent.firstOrNull(), null)
+            } catch (e: Exception) {
+                ok = false
+                // it never left: don't leave it "sending" forever
+                val why = (if (e is SecurityException) "perm" else "ex") + ":" + e.javaClass.simpleName + ";sub=" + sub
+                if (rowId > 0) markFailed(app, rowId, why) else noteFail(app, -1, why)
+            }
         }
         return ok
     }
@@ -270,6 +319,7 @@ object SmsApp {
         var a = addr
         var sub = -1
         val rows = ArrayList<JSONObject>()
+        val fails = failOf(ctx)
         if (t > 0) try {
             ctx.contentResolver.query(Telephony.Sms.CONTENT_URI,
                 arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.SUBSCRIPTION_ID),
@@ -281,6 +331,7 @@ object SmsApp {
                     if (sub < 0 && !c.isNull(5)) sub = c.getInt(5)
                     rows += JSONObject().put("id", c.getLong(0)).put("body", c.getString(2) ?: "").put("time", c.getLong(3))
                         .put("out", type != Telephony.Sms.MESSAGE_TYPE_INBOX)
+                        .put("err", if (type == Telephony.Sms.MESSAGE_TYPE_FAILED) fails.optString(c.getLong(0).toString()) else "")
                         .put("st", when (type) {
                             Telephony.Sms.MESSAGE_TYPE_OUTBOX, Telephony.Sms.MESSAGE_TYPE_QUEUED -> 1
                             Telephony.Sms.MESSAGE_TYPE_FAILED -> 2
@@ -299,7 +350,7 @@ object SmsApp {
             cancelNote(ctx, t, a)
         }
         return JSONObject().put("id", if (t > 0) t.toString() else "").put("addr", a)
-            .put("name", Names(ctx, store).of(a) ?: JSONObject.NULL).put("sub", sub).put("msgs", msgs).put("unread", unread(ctx))
+            .put("name", Names(ctx, store).of(a) ?: JSONObject.NULL).put("sub", if (valid(sub)) sub else pickSub(ctx, -1)).put("subs", JSONArray(subs(ctx))).put("msgs", msgs).put("unread", unread(ctx))
     }
 
     /** Names for numbers: the phone's contacts if allowed, else the names the user gave in محافظي. */
@@ -389,8 +440,12 @@ class MmsDeliverReceiver : BroadcastReceiver() {
 class SmsSentReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val uri = intent.data ?: return
-        val type = if (resultCode == Activity.RESULT_OK) Telephony.Sms.MESSAGE_TYPE_SENT else Telephony.Sms.MESSAGE_TYPE_FAILED
+        val ok = resultCode == Activity.RESULT_OK
+        val type = if (ok) Telephony.Sms.MESSAGE_TYPE_SENT else Telephony.Sms.MESSAGE_TYPE_FAILED
         try { context.contentResolver.update(uri, ContentValues().apply { put(Telephony.Sms.TYPE, type) }, null, null) } catch (_: Exception) { }
+        // the phone's reason (result code / network error code), for the screen and the server log
+        val why = if (ok) "ok" else "r" + resultCode + "/" + intent.getIntExtra("errorCode", -1)
+        SmsApp.noteFail(context, if (ok) -1 else (uri.lastPathSegment?.toLongOrNull() ?: -1), why)
         MainActivity.smsChanged()
     }
 }

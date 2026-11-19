@@ -40,6 +40,7 @@ class MainActivity : Activity() {
         private const val REQ_NOTE = 12
         private const val REQ_ROLE = 13
         private const val REQ_CONTACTS = 14
+        private const val REQ_SEND = 15
     }
 
     private lateinit var web: WebView
@@ -228,6 +229,7 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_CONTACTS) { smsChanged(); return }
+        if (requestCode == REQ_SEND) { js("window.App&&App.onSendPerm&&App.onSendPerm(" + (checkSelfPermission(Manifest.permission.SEND_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED) + ")"); return }
         if (requestCode == REQ_NOTE) { WatchService.start(this); reloadUi(); return }   // shows the "محافظي شغال" line now
         if (requestCode == REQ_SMS) {
             if (!SmsSource.hasPermission(this)) {
@@ -494,15 +496,25 @@ class MainActivity : Activity() {
             }.start()
         }
 
+        /** Removes a failed SMS before sending it again. */
+        @JavascriptInterface
+        fun deleteSms(id: String) { Thread { id.toLongOrNull()?.let { SmsApp.delete(this@MainActivity, it) } }.start() }
+
         /** Which conversation is on the screen ("" = none). */
         @JavascriptInterface
         fun viewing(id: String) { viewingThread = id }
 
         @JavascriptInterface
         fun sendSms(addr: String, text: String, sub: Int) {
+            if (checkSelfPermission(Manifest.permission.SEND_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                // the SMS app should have it already; if the phone didn't give it, ask (the text stays in the box)
+                main.post { requestPermissions(arrayOf(Manifest.permission.SEND_SMS), REQ_SEND) }
+                js("window.App&&App.onSent(false,'perm')")
+                return
+            }
             Thread {
                 val ok = try { SmsApp.send(this@MainActivity, addr, text, sub) } catch (_: Exception) { false }
-                js("window.App&&App.onSent($ok)")
+                js("window.App&&App.onSent($ok,'')")
             }.start()
         }
 
