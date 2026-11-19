@@ -44,3 +44,8 @@ android {
         jvmTarget = "17"
     }
 }
+
+dependencies {
+    // lets Quiet reach the phone service's USSD call (the transfer with no screen when the phone is locked)
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
+}

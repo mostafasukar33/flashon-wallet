@@ -56,6 +56,8 @@ object Xfer {
     private const val TIMEOUT = 75_000L
     /** How long a transfer waits for a phone locked with a password to be opened, before anything is dialed. */
     private const val LOCK_WAIT = 5 * 60_000L
+    /** How long it waits for each of Vodafone's answers when it talks with no screen. */
+    private const val QUIET_WAIT = 40_000L
     private const val KEEP = 20
     private val main = Handler(Looper.getMainLooper())
     private val rnd = SecureRandom()
@@ -73,6 +75,14 @@ object Xfer {
         @Volatile var unlockTried = false
         @Volatile var seen = false
         @Volatile var done = false
+        /** Talking to Vodafone with no screen ([Quiet]): the phone is locked with a password. */
+        @Volatile var quiet = false
+        /** The SIM it talks on, and which answer it waits for (an older one, or its timeout, is dropped). */
+        @Volatile var qSub = -1
+        @Volatile var qGen = 0
+        /** The reply just sent is the first one with "#" after it on this phone: does Vodafone take it. */
+        @Volatile var qProbe = false
+        @Volatile var qPrev = ""
         @Volatile var last = ""
         @Volatile var lastNote = ""
         /** The pages already read of a message Vodafone cut in pages ("… 0:مزيد"), and how many. */
@@ -132,7 +142,9 @@ object Xfer {
         return JSONObject().put("perm", perm).put("phone", phonePerm(ctx)).put("acc", acc).put("ready", perm && acc)
             .put("remote", remoteOn(store)).put("code", template(store)).put("def", Ussd.DEFAULT_VF)
             .put("lk", Unlock.state(ctx)).put("sec", Unlock.secure(ctx))
-            .put("hold", Unlock.secure(ctx) && !Unlock.has(ctx))   // for the iPhone: a locked Android waits to be opened
+            .put("xq", quietState(store)).put("xqOn", quietOn(store)).put("xqWhy", store.getStr("xq_why") ?: "")
+            // for the iPhone: a locked Android waits to be opened
+            .put("hold", Unlock.secure(ctx) && !Unlock.has(ctx) && !(quietOn(store) && quietState(store) != "bad"))
             .put("busy", j != null && !j.done).put("line", Remote.state).put("smsApp", SmsApp.isDefault(ctx)).put("accounts", accs).put("list", history(store))
     }
 
@@ -220,7 +232,7 @@ object Xfer {
         synchronized(this) {
             val cur = job
             if (cur != null && !cur.done) {
-                if (System.currentTimeMillis() - cur.startedAt < LOCK_WAIT + TIMEOUT + 4 * 60_000L + 10_000L) {
+                if (System.currentTimeMillis() - cur.startedAt < LOCK_WAIT + TIMEOUT + 4 * 60_000L + 4 * QUIET_WAIT + 10_000L) {
                     val w = "فيه تحويل شغال دلوقتي، استنى يخلص"
                     finishEarly(app, store, id, base, w); return w
                 }
@@ -244,8 +256,15 @@ object Xfer {
      * a "0" and for the PIN alike. And on a phone locked with a password (Infinix) Vodafone's screen stays behind
      * the lock. So then nothing is dialed until the phone is opened: our screen asks for it (fingerprint or
      * password), and the code goes out the moment it's open; [LOCK_WAIT] with no opening = nothing was sent.
+     * Before that, a phone locked with a password first tries the talk with no screen at all ([quietStart]).
      */
     private fun withScreen(app: Context, j: Job) {
+        // locked with a password: first with no screen at all, then (if this phone or Vodafone won't) the screen
+        if (secureLocked(app) && quietStart(app, j)) return
+        screenWay(app, j)
+    }
+
+    private fun screenWay(app: Context, j: Job) {
         UssdService.watch(true)
         try {
             app.startActivity(Intent(app, XferActivity::class.java)
@@ -265,6 +284,132 @@ object Xfer {
         }
         j.log("بيطلب الكود بالشاشة")
         main.postDelayed({ if (job === j && !j.dialed) dial(app, j) }, 2500)
+    }
+
+    // ---------- with no screen: the phone locked with a password ----------
+
+    /** "" = not tried yet on this phone, "ok" = Vodafone took an answer with "#" after it, "bad" = it didn't (not again). */
+    fun quietState(store: Store): String = store.getStr("xq") ?: ""
+    fun quietOn(store: Store) = store.getLong("xq_off") != 1L
+
+    /** Turned on again from the settings: tried anew, even after a "bad". */
+    fun setQuiet(store: Store, on: Boolean) {
+        store.putLong("xq_off", if (on) 0 else 1)
+        if (on) { store.putStr("xq", ""); store.putStr("xq_why", "") }
+    }
+
+    private fun quietBad(store: Store, why: String) { store.putStr("xq", "bad"); store.putStr("xq_why", why.take(300)) }
+
+    /** Starts talking to Vodafone with no screen; false = it can't here (nothing was sent), the screen way goes on. */
+    private fun quietStart(app: Context, j: Job): Boolean {
+        val store = Store(app)
+        if (!quietOn(store) || quietState(store) == "bad") return false
+        val sub = quietSub(app, j)
+        if (sub == null) { j.log("مقدرش يختار خط المحفظة من غير شاشة"); return false }
+        if (!Quiet.ready()) { j.log("الموبايل ده مش سامح يكلّم فودافون من غير شاشة (${Quiet.why})"); return false }
+        j.quiet = true; j.qSub = sub
+        Thread { record(store, j.id, JSONObject().put("msg", "الأندرويد مقفول، فبيكلّم فودافون من غير شاشة")); refresh(app) }.start()
+        if (!qSend(app, j, j.code, "طلب الكود من غير شاشة")) qOff(app, j, "مقدرش يطلب الكود من غير شاشة")
+        return true
+    }
+
+    /** The wallet's SIM; with one SIM, the phone's own; with two and none picked, null (never the other line). */
+    @SuppressLint("MissingPermission")   // checked in start()
+    private fun quietSub(ctx: Context, j: Job): Int? {
+        if (j.sub >= 0) return j.sub
+        val n = try { ctx.getSystemService(SubscriptionManager::class.java).activeSubscriptionInfoCount } catch (_: Exception) { 2 }
+        if (n > 1) return null
+        val d = SubscriptionManager.getDefaultVoiceSubscriptionId().takeIf { it >= 0 } ?: SubscriptionManager.getDefaultSubscriptionId()
+        return d.takeIf { it >= 0 }
+    }
+
+    /** Sends one string and waits for Vodafone's answer ([qPage]), [QUIET_WAIT] at most ([qLate]). */
+    private fun qSend(app: Context, j: Job, s: String, what: String): Boolean {
+        val gen = ++j.qGen
+        j.log(what)
+        val sent = Quiet.send(j.qSub, s) { asks, text -> if (job === j && !j.done && j.quiet && gen == j.qGen) qPage(app, j, asks, text) }
+        if (sent) main.postDelayed({ if (job === j && !j.done && j.quiet && gen == j.qGen) qLate(app, j) }, QUIET_WAIT)
+        return sent
+    }
+
+    private fun qLate(app: Context, j: Job) {
+        if (!j.pinSent) qOff(app, j, "فودافون مردتش من غير شاشة")
+        else end(app, j, "unsure", "فودافون مردتش بعد الرقم السري. استنى رسالة فودافون، هي اللي هتقول اتحوّل ولا لأ")
+    }
+
+    /**
+     * Nothing that moves money was sent (no PIN): the talk with no screen stops and the screen way goes on (it waits
+     * for the phone to be opened). Vodafone's open talk ends by itself in a minute.
+     */
+    private fun qOff(app: Context, j: Job, why: String) {
+        if (j.pinSent) { end(app, j, "unsure", "$why بعد الرقم السري. استنى رسالة فودافون، هي اللي هتقول اتحوّل ولا لأ"); return }
+        j.quiet = false; j.qGen++; j.qProbe = false
+        j.confirmSent = false; j.pages.setLength(0); j.more = 0; j.seen = false; j.last = ""; j.lastNote = ""
+        j.log("$why، فهيكمّل بشاشة فودافون")
+        screenWay(app, j)
+    }
+
+    /** One of Vodafone's answers with no screen: the same rules as its screens ([Ussd.step]). */
+    private fun qPage(app: Context, j: Job, asks: Boolean, raw: String?) {
+        val store = Store(app)
+        val text = (raw ?: "").trim()
+        j.qGen++   // this answer came: its timeout is off
+        if (text.isBlank()) {
+            if (!j.pinSent) qOff(app, j, "فودافون مردتش بكلام من غير شاشة")
+            else end(app, j, "unsure", "فودافون مردتش بكلام بعد الرقم السري. استنى رسالة فودافون")
+            return
+        }
+        j.seen = true
+        j.log("فودافون: $text")
+        val step = Ussd.step(text, asks, j.to, j.pinSent, j.confirmSent, j.pages.toString())
+        if (j.qProbe) {
+            j.qProbe = false
+            // the first answer sent with "#" after it: Vodafone moved on to a new page = it takes answers this way
+            val movedOn = text != j.qPrev && step in setOf(Ussd.Step.PIN, Ussd.Step.MORE, Ussd.Step.CONFIRM, Ussd.Step.OK)
+            if (!movedOn) {
+                if (!Ussd.glitch(text)) quietBad(store, "فودافون مقبلتش الرد من غير شاشة: $text")
+                qOff(app, j, "فودافون مقبلتش الرد من غير شاشة"); return
+            }
+            if (quietState(store) != "ok") { store.putStr("xq", "ok"); store.putStr("xq_why", "") }
+        }
+        j.qPrev = text
+        val wait = quietState(store) != "ok"
+        when (step) {
+            Ussd.Step.MORE -> {
+                val reply = Ussd.quietReply(Ussd.moreKey(text))
+                if (reply == null || j.more >= 4) { qOff(app, j, "فودافون سألت سؤال مش مفهوم من غير شاشة"); return }
+                j.more++; j.pages.append(text).append('\n')
+                j.qProbe = wait
+                if (!qSend(app, j, reply, "طلب باقي الرسالة ($reply)")) qOff(app, j, "مقدرش يرد من غير شاشة")
+            }
+            Ussd.Step.PIN -> {
+                // the PIN goes only after Vodafone took an answer with "#" on this phone (a menu key, never the PIN itself)
+                if (wait) { qOff(app, j, "فودافون سألت عن الرقم السري قبل ما يتأكد إنها بتقبل الرد من غير شاشة"); return }
+                val pin = j.takePin() ?: run { end(app, j, "stop", "الرقم السري اتمسح قبل ما يتكتب"); return }
+                val reply = Ussd.quietReply(pin) ?: run { end(app, j, "stop", "الرقم السري مش أرقام"); return }
+                j.pinSent = true
+                if (!qSend(app, j, reply, "بعت الرقم السري من غير شاشة")) end(app, j, "fail", "مقدرش يبعت الرقم السري لفودافون، فمفيش حاجة اتحوّلت")
+            }
+            Ussd.Step.CONFIRM -> {
+                j.confirmSent = true
+                j.qProbe = wait
+                if (!qSend(app, j, Ussd.quietReply("1")!!, "أكد بـ 1 من غير شاشة")) qOff(app, j, "مقدرش يرد من غير شاشة")
+            }
+            Ussd.Step.OK -> end(app, j, "ok", text)
+            Ussd.Step.UNSURE, Ussd.Step.WAIT -> if (j.pinSent) end(app, j, "unsure", text) else qOff(app, j, "رد فودافون من غير شاشة مش واضح")
+            Ussd.Step.FAIL, Ussd.Step.STOP -> {
+                val failed = step == Ussd.Step.FAIL || Ussd.step(text, false, j.to, j.pinSent, j.confirmSent) == Ussd.Step.FAIL
+                when {
+                    // after the PIN, Vodafone talks about the PIN (wrong, or asks it again): never again with no screen
+                    j.pinSent && Ussd.mentionsPin(text) -> {
+                        quietBad(store, "فودافون قالت كده بعد الرقم السري من غير شاشة: $text")
+                        end(app, j, "fail", text + "\n(لو الرقم السري كان صح، يبقى فودافون مبتقبلش الرد من غير شاشة، واتقفل. تقدر تجرّبه تاني من الإعدادات)")
+                    }
+                    !j.pinSent && (Ussd.glitch(text) || !failed) -> qOff(app, j, if (failed) "مشكلة في الشبكة من غير شاشة" else "فودافون سألت سؤال مش مفهوم من غير شاشة")
+                    else -> end(app, j, if (failed) "fail" else "stop", j.pages.toString() + text)
+                }
+            }
+        }
     }
 
     /** Locked with a password, fingerprint or pattern: Vodafone's screen won't show until it's opened. */

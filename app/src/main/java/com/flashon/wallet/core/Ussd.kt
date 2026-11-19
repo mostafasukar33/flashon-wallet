@@ -94,6 +94,16 @@ object Ussd {
     // Vodafone takes no answer inside the code itself ("*9*7*N*A*0#" and "*9*7*N*A*PIN#" both came back
     // "عفوا الرقم الذي ادخالته غير صحيح لتحويل …"), so the PIN is only ever typed in Vodafone's own screen.
 
+    /**
+     * A reply sent into Vodafone's open talk with no screen at all (the phone locked with a password): Android sends
+     * a string as a USSD answer only when it ends in "#" or is one or two digits, and dials anything else as a phone
+     * call (a PIN of 4+ digits would ring a number). So every reply gets a "#" after it; null for anything but keys.
+     */
+    fun quietReply(key: String?): String? = if (key != null && Regex("^[0-9*]{1,12}$").matches(key)) "$key#" else null
+
+    /** The words talk about the PIN (asks it again, or says it's wrong). */
+    fun mentionsPin(text: String): Boolean = PIN.containsMatchIn(clean(text))
+
     /** Does this text ask something (the PIN, or to confirm): a question, even when it comes as a notification. */
     fun asks(text: String): Boolean { val t = clean(text); return PIN.containsMatchIn(t) || CONFIRM.containsMatchIn(t) }
 

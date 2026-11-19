@@ -205,6 +205,7 @@ if (!B) {
     openNoteAccess:function(){mock.listen={on:true,live:true,at:Date.now()};mock.hold.held=false;setTimeout(App.reload,300)},
     askCallPerm:function(){mock.xfer.perm=mock.xfer.phone=true;mock.xfer.ready=mock.xfer.acc;setTimeout(App.reload,200)},
     openAccessibility:function(){mock.xfer.acc=true;mock.xfer.ready=mock.xfer.perm;setTimeout(App.reload,300)},
+    setQuiet:function(on){mock.xfer.xqOn=on;if(on){mock.xfer.xq='';mock.xfer.xqWhy='';}setTimeout(App.reload,100)},
     setXferRemote:function(on){mock.xfer.remote=on;mock.xfer.line=on?'on':'off';setTimeout(App.reload,100)},
     setXferCode:function(c){mock.xfer.code=c||mock.xfer.def;setTimeout(App.reload,100);return true},
     setLockPin:function(p){mock.xfer.lk=p?'on':'off';setTimeout(App.reload,100);return ''},
@@ -797,7 +798,7 @@ function xferSettings(){
       '<span class="xs mute" style="line-height:1.6">الطلب بيتقفل على الآيفون بنفس باسورد اللينك قبل ما يطلع، والسيرفر ميقدرش يقراه ولا يعمل طلب من عنده. يعني اللي يقدر يحوّل هو اللي معاه اللينك والباسورد والرقم السري بتاع المحفظة. الطلب اللي يتأخر أكتر من 10 دقايق مبيتنفذش.</span>';
     if (x.remote) h+=(smsOn()?'<span class="xs" style="color:var(--in);font-weight:600;line-height:1.6">✓ «محافظي» تطبيق الرسايل: الآيفون بيصحّي الموبايل ده برسالة والتحويل بيتم حتى والشاشة مقفولة.</span>':
       '<div class="alert mid"><b>4. خلّي «محافظي» تطبيق الرسايل</b><span style="line-height:1.7">الموبايل ده بيجمّد «محافظي» والشاشة مطفية، فطلب الآيفون مش هيتنفذ غير لما تفتحه. لما «محافظي» يبقى تطبيق الرسايل، الآيفون بيصحّيه برسالة ويحوّل على طول.</span><button class="btn main" data-act="fixhold">إزاي</button></div>');
-    if (x.remote && !VIEW) h+=lockBox(x);
+    if (x.remote && !VIEW) h+=quietBox(x)+(x.lk&&x.lk!=='off'?lockBox(x):'');   // typing the lock PIN: only to remove one saved before
   }
   h+='<button class="btn ghost" data-act="xfer">جرّب تحويل</button>'+
     '<details class="old"><summary>كود التحويل</summary><div class="col" style="gap:8px;margin-top:8px"><span class="xs mute" style="line-height:1.6">{n} مكان الرقم و{a} مكان المبلغ. غيّره بس لو فودافون غيّرت الكود.</span>'+
@@ -805,9 +806,21 @@ function xferSettings(){
     '<div class="grid2"><button class="btn ghost" data-act="xcode">احفظ</button><button class="btn ghost" data-act="xcodedef">رجّع العادي</button></div></div></details>';
   return h+'</div>';
 }
+// the transfer with no screen when the Android is locked with a password (Vodafone's screen stays behind the lock)
+function quietBox(x){
+  var h='<div class="col" style="gap:8px;line-height:1.7;border-top:1px solid var(--line2);padding-top:10px">'+
+    '<label class="switch"><span style="font-size:15px">5. حوّل والأندرويد مقفول (من غير شاشة)</span><input type="checkbox" id="s_xq"'+(x.xqOn!==false?' checked':'')+'></label>';
+  if (!x.sec) return h+'<span class="xs mute">الموبايل ده مفيهوش قفل بباسورد، فالتحويل بيتم بشاشة فودافون العادية.</span></div>';
+  h+='<span class="xs mute" style="line-height:1.6">والأندرويد مقفول بباسورد، شاشة فودافون مبتظهرش. فـ«محافظي» بيكلّم فودافون في الخلفية من غير أي شاشة ومن غير ما يفتح القفل: بيطلب الكود، ويقرا ردها، ويبعت الرقم السري. الباسورد بتاع الموبايل بيفضل زي ما هو.</span>';
+  if (x.xqOn===false) return h+'</div>';
+  if (x.xq==='ok') h+='<span class="xs" style="color:var(--in);font-weight:600">✓ اتجربت على الموبايل ده وفودافون قبلتها.</span>';
+  else if (x.xq==='bad') h+='<div class="alert mid"><b>فودافون مقبلتهاش على الموبايل ده</b><span style="line-height:1.7">'+esc(x.xqWhy||'')+'</span><span class="xs">لو عايز تجرّبها تاني: اقفل المفتاح وافتحه.</span></div>';
+  else h+='<span class="xs" style="color:var(--day);font-weight:600;line-height:1.6">لسه هتتجرب أول تحويل والأندرويد مقفول. قبل الرقم السري بيتأكد إن فودافون بتقبل الرد بالطريقة دي، ولو مقبلتش بيستنى الموبايل يتفتح زي الأول.</span>';
+  return h+'</div>';
+}
 // the phone's own lock PIN: typed on the lock screen for a transfer from the iPhone (Vodafone's screen doesn't show over the lock)
 function lockBox(x){
-  var h='<div class="col" style="gap:8px;line-height:1.7;border-top:1px solid var(--line2);padding-top:10px"><b>5. افتح قفل الشاشة لوحده</b>';
+  var h='<div class="col" style="gap:8px;line-height:1.7;border-top:1px solid var(--line2);padding-top:10px"><b>6. أو: افتح قفل الشاشة لوحده</b>';
   if (!x.sec) return h+'<span class="xs mute">الموبايل ده مفيهوش قفل بباسورد، فمش محتاج.</span></div>';
   if (x.lk==='on') return h+'<span class="xs" style="color:var(--in);font-weight:600">✓ لما طلب ييجي من الآيفون والأندرويد مقفول، «محافظي» بيكتب رقم قفل الشاشة لوحده ويحوّل.</span>'+
     '<span class="xs mute">لو غيّرت رقم قفل الشاشة، احفظ الجديد هنا.</span><button class="btn ghost" data-act="lkoff">شيل رقم القفل</button></div>';
@@ -1270,7 +1283,7 @@ function watchCards(){
     obs.observe(w);
   }
 }
-document.addEventListener('change', function(e){ if(e.target.id==='month'){ S.month=e.target.value; render(); } if(e.target.id==='rc_hide'){ RC.hide=e.target.checked; RC.url=null; receiptSheet(RC.id); return; } if(e.target.id==='s_xrm'){ if (B.setXferRemote) B.setXferRemote(e.target.checked); toast(e.target.checked?'التحويل من الآيفون اشتغل':'التحويل من الآيفون اتقفل'); } if(e.target.id==='s_txn'){ B.setTxNotify(e.target.checked); toast(e.target.checked?'هيجيلك إشعار مع كل عملية':'الإشعارات دي اتقفلت'); } });
+document.addEventListener('change', function(e){ if(e.target.id==='month'){ S.month=e.target.value; render(); } if(e.target.id==='rc_hide'){ RC.hide=e.target.checked; RC.url=null; receiptSheet(RC.id); return; } if(e.target.id==='s_xq'){ if (B.setQuiet) B.setQuiet(e.target.checked); toast(e.target.checked?'التحويل والأندرويد مقفول اشتغل':'اتقفل، والتحويل هيستنى الأندرويد يتفتح'); } if(e.target.id==='s_xrm'){ if (B.setXferRemote) B.setXferRemote(e.target.checked); toast(e.target.checked?'التحويل من الآيفون اشتغل':'التحويل من الآيفون اتقفل'); } if(e.target.id==='s_txn'){ B.setTxNotify(e.target.checked); toast(e.target.checked?'هيجيلك إشعار مع كل عملية':'الإشعارات دي اتقفلت'); } });
 var qT;
 document.addEventListener('input', function(e){
   if(e.target.id==='smsText'){ S.draft=e.target.value; grow(e.target); return; }

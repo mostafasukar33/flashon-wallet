@@ -273,6 +273,19 @@ fun main() {
     check("real 'incorrect' answer = failed", Ussd.step(badAnswer, false, me, true, false) == Ussd.Step.FAIL, Ussd.step(badAnswer, false, me, true, false))
     check("real 'incorrect' answer isn't done or a PIN question", Ussd.step(badAnswer, true, me, true, false).let { it != Ussd.Step.OK && it != Ussd.Step.PIN && it != Ussd.Step.CONFIRM })
 
+    // ---- the talk with no screen (phone locked with a password): replies only as "…#" ----
+    check("quiet reply: the more key", Ussd.quietReply(Ussd.moreKey(page1)) == "0#", Ussd.quietReply(Ussd.moreKey(page1)))
+    check("quiet reply: the PIN goes with # (never dialed as a call)", Ussd.quietReply("123456") == "123456#")
+    check("quiet reply: confirm", Ussd.quietReply("1") == "1#")
+    check("quiet reply: nothing but keys", Ussd.quietReply(null) == null && Ussd.quietReply("") == null && Ussd.quietReply("12 34") == null && Ussd.quietReply("1#") == null && Ussd.quietReply("0123456789012") == null)
+    // Android gives a page that waits for an answer as "failed + Vodafone's words": read as a question (asks = true)
+    check("quiet: page 1 = read the rest", Ussd.step(page1, true, me, false, false) == Ussd.Step.MORE)
+    check("quiet: page 2 = the PIN", Ussd.step(pinPage, true, me, false, false, page1 + "\n") == Ussd.Step.PIN)
+    check("quiet: done page = done", Ussd.step(donePage, true, me, true, false, page1 + "\n") == Ussd.Step.OK)
+    check("quiet: MMI error as 'failed + words' = stop, a failure, a hiccup", Ussd.step(mmi, true, me, false, false) == Ussd.Step.STOP && Ussd.step(mmi, false, me, false, false) == Ussd.Step.FAIL && Ussd.glitch(mmi))
+    check("quiet: wrong PIN talks about the PIN", Ussd.mentionsPin("عفواً، الرقم السري غير صحيح") && Ussd.mentionsPin(pinPage) && !Ussd.mentionsPin(donePage) && !Ussd.mentionsPin(page1))
+    check("quiet: the same PIN question again after the PIN = stop", Ussd.step(pinPage, true, me, true, false, page1) == Ussd.Step.STOP)
+
     // ---- a question, even when it comes as a notification ----
     check("asks: PIN", Ussd.asks("لتأكيد تحويل 500 جنيه الى 01012345678 ادخل الرقم السري"))
     check("asks: confirm", Ussd.asks("سيتم تحويل 500 جنيه. للتأكيد اضغط 1"))

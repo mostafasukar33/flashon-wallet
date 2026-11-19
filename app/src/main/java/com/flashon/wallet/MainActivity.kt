@@ -607,6 +607,13 @@ class MainActivity : Activity() {
             return true
         }
 
+        /** The transfer with no screen when this phone is locked with a password (on = tried anew, even after it failed). */
+        @JavascriptInterface
+        fun setQuiet(on: Boolean) {
+            Xfer.setQuiet(store, on)
+            reloadUi()
+        }
+
         /** The phone's own lock PIN or password, typed on the lock screen for a transfer from the iPhone ("" = remove). "" = saved, else what's wrong. */
         @JavascriptInterface
         fun setLockPin(pin: String): String {
