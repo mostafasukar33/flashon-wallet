@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>جرس محافظي</title>
+<link rel="icon" href="/icon.png">
+<style>
+@font-face{font-family:Plex;src:url(/fonts/IBMPlexSansArabic-Regular.ttf);font-weight:400}
+@font-face{font-family:Plex;src:url(/fonts/IBMPlexSansArabic-Bold.ttf);font-weight:700}
+:root{--bg:#F4F5F2;--ink:#16181B;--mute:#555A60;--blue:#1E5AA8;--good:#0B4F2F;--bad:#7A2410}
+@media (prefers-color-scheme: dark){:root{--bg:#16181B;--ink:#F4F5F2;--mute:#B9BDC2;--good:#8FD3AE;--bad:#F2A48F}}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Plex,sans-serif}
+main{max-width:520px;margin:0 auto;padding:12vh 16px 40px;display:flex;flex-direction:column;gap:16px}
+h1{margin:0;font-size:26px}
+p{margin:0;line-height:1.8;font-size:16px;color:var(--mute)}
+button{border:0;border-radius:12px;min-height:52px;font:inherit;font-size:17px;font-weight:700;background:var(--blue);color:#fff}
+button:disabled{opacity:.6}
+#msg{min-height:28px;font-weight:700;line-height:1.7}
+#msg.ok{color:var(--good)}#msg.bad{color:var(--bad)}
+</style>
+</head>
+<body>
+<main>
+<h1>🔔 جرس محافظي</h1>
+<p>الصفحة دي بتخلي الآيفون يصحّي «محافظي» على الموبايل ده لما تحوّل منه. دوس الزرار ووافق على الإشعارات، ومش هتحتاج تفتحها تاني.</p>
+<p>هيظهر إشعار «🔔 محافظي» ثانية واحدة لما تبعت تحويل من الآيفون، و«محافظي» بيشيله لوحده.</p>
+<button id="go">شغّل الجرس</button>
+<span id="msg"></span>
+</main>
+<script>
+/* One-time doorbell sign-up: the app opened this page with /bell#<id>.<word>. The word only lets this browser
+   sign up for the doorbell (an empty push when the iPhone sends a transfer); it opens nothing else. */
+(function(){
+  'use strict';
+  var h=(location.hash||'').slice(1).split('.'), id=h[0]||'', word=h[1]||'';
+  var go=document.getElementById('go'), msg=document.getElementById('msg');
+  function say(t, ok){ msg.textContent=t; msg.className=ok?'ok':'bad'; }
+  function unb64(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='='; var b=atob(s), u=new Uint8Array(b.length); for(var i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
+  if (!/^[A-Za-z0-9_-]{16}$/.test(id) || word.length<20) { go.disabled=true; say('افتح الصفحة دي من زرار «شغّل الجرس» في «محافظي».'); return; }
+  try{ history.replaceState(null,'','/bell'); }catch(e){}   // the word out of the address bar
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) { go.disabled=true; say('المتصفح ده مش بيدعم الإشعارات، افتح اللينك في Chrome (كروم).'); return; }
+  go.addEventListener('click', function(){
+    go.disabled=true; say('بيشغّل…', true);
+    Notification.requestPermission().then(function(p){
+      if (p!=='granted') throw new Error('perm');
+      return navigator.serviceWorker.register('/sw.js').then(function(){ return navigator.serviceWorker.ready; });
+    }).then(function(reg){
+      return reg.pushManager.getSubscription().then(function(s){
+        if (s) return s;
+        return fetch('/api/key').then(function(r){ return r.json(); }).then(function(j){ return reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:unb64(j.key)}); });
+      });
+    }).then(function(s){
+      return fetch('/api/s/'+id+'/bellsub', {method:'POST', headers:{'X-Bell':word, 'Content-Type':'application/json'}, body:JSON.stringify(s.toJSON())});
+    }).then(function(r){
+      if (r.status===403) throw new Error('old');
+      if (!r.ok) throw new Error('net');
+      go.textContent='✓ الجرس شغال'; say('✓ الجرس اشتغل. ارجع لـ«محافظي» على الموبايل ده.', true);
+    }).catch(function(e){
+      go.disabled=false;
+      var m=e&&e.message;
+      say(m==='perm'?'لازم توافق على الإشعارات علشان الجرس يشتغل. لو قفلتها، افتحها من إعدادات كروم للموقع ده.':
+        m==='old'?'اللينك ده قديم. ارجع لـ«محافظي» ودوس «شغّل الجرس» تاني.':'مفيش نت أو حصلت مشكلة، جرّب تاني.');
+    });
+  });
+})();
+</script>
+</body>
+</html>

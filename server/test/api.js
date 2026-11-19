@@ -129,6 +129,24 @@ function wsOpen(port, path, tok) {
     eq('صفحة الآيفون بتعرف إن الأندرويد متصل', (await fetch(S, {headers: viewer()})).headers.get('x-live'), '1');
     ws.close(); await new Promise(r => setTimeout(r, 500));
     eq('… ولما يقفل بتعرف', (await fetch(S, {headers: viewer()})).headers.get('x-live'), '0');
+    // الجرس: كروم على الأندرويد بيشترك بكلمة لمرة واحدة، والسيرفر بيرن عليه مع كل طلب
+    const word = b64(crypto.randomBytes(24));
+    eq('كلمة الجرس من غير مفتاح الموبايل مرفوضة', (await fetch(S + '/belltok', {method: 'POST', body: word})).status, 401);
+    eq('الموبايل بيعمل كلمة للجرس', (await fetch(S + '/belltok', {method: 'POST', headers: phone(), body: word})).status, 200);
+    const bellSub = {endpoint: PS + '/push/bell', keys: {p256dh: b64(crypto.randomBytes(65)), auth: b64(crypto.randomBytes(16))}};
+    eq('اشتراك الجرس بكلمة غلط مرفوض', (await fetch(S + '/bellsub', {method: 'POST', headers: {'x-bell': b64(crypto.randomBytes(24)), 'content-type': 'application/json'}, body: JSON.stringify(bellSub)})).status, 403);
+    eq('كروم بيشترك في الجرس', (await fetch(S + '/bellsub', {method: 'POST', headers: {'x-bell': word, 'content-type': 'application/json'}, body: JSON.stringify(bellSub)})).status, 200);
+    eq('صفحة الآيفون بتعرف إن فيه جرس', (await fetch(S, {headers: viewer()})).headers.get('x-live'), 'b');
+    const before = got.length;
+    const rr = await (await fetch(C, {method: 'POST', headers: viewer(), body: sealCmd(L.key, {...cmd1, id: 'bell12345678'})})).json();
+    eq('الطلب بيرن الجرس', rr.bell, 1);
+    const ringed = got.slice(before).find(x => x.path === '/push/bell');
+    eq('… رنة فاضية (مفيهاش أي حاجة تتقري)', ringed && ringed.body.length, 0);
+    eq('… وبتوقيع السيرفر', !!(ringed && /^vapid t=/.test(ringed.h.authorization || '')), true);
+    eq('الأندرويد بيعرف إن الجرس شغال', (await (await fetch(C, {headers: phone()})).json()).bells, 1);
+    await fetch(C + '?upto=999', {method: 'DELETE', headers: phone()});
+    eq('صفحة الجرس موجودة', (await (await fetch(U + '/bell')).text()).includes('جرس محافظي'), true);
+    eq('ملف الإشعارات بيعرض الجرس', (await (await fetch(U + '/sw.js')).text()).includes('🔔 محافظي'), true);
     eq('طلب والأندرويد مش متصل بيستنى', (await (await fetch(C, {method: 'POST', headers: viewer(), body: sealCmd(L.key, {...cmd1, id: 'second123456'})})).json()).live, false);
     eq('… ويلاقيه أول ما يتصل', (await (await fetch(C, {headers: phone()})).json()).cmds.length, 1);
     await fetch(C + '?upto=999', {method: 'DELETE', headers: phone()});

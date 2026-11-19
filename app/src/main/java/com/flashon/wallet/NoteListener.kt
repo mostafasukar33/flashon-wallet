@@ -75,6 +75,10 @@ class NoteListener : NotificationListenerService() {
             return JSONObject().put("on", on).put("live", connected).put("at", store.getLong("nl_at"))
         }
 
+        /** Chrome's doorbell notification: the iPhone sent a transfer request. */
+        fun isBell(n: Notification?): Boolean =
+            n?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()?.startsWith(Remote.BELL_TITLE) == true
+
         fun isSmsApp(ctx: Context, pkg: String?): Boolean {
             if (pkg.isNullOrBlank() || pkg == ctx.packageName) return false
             if (pkg in SMS_APPS) return true
@@ -113,6 +117,13 @@ class NoteListener : NotificationListenerService() {
         val s = sbn ?: return
         // a transfer is running and the phone shows Vodafone's answer as a notification
         Xfer.job?.let { j -> if (!j.done) try { Xfer.onNote(this, s.packageName, s.notification) } catch (_: Exception) { } }
+        // the doorbell from the iPhone: fetch the request, and the notification goes away (it's only a signal)
+        if (isBell(s.notification)) {
+            WatchService.saw("bell")
+            Remote.ring(this)
+            try { cancelNotification(s.key) } catch (_: Exception) { }
+            return
+        }
         if (!maybeSms(this, s.packageName, s.notification)) return
         WatchService.saw("ntf")
         Poke.now(this, "ntf")
@@ -133,6 +144,7 @@ object Poke {
 
     fun now(ctx: Context, how: String) {
         app = ctx.applicationContext
+        try { Remote.poke(app) } catch (_: Exception) { }   // awake anyway: a quick look for a transfer request from the iPhone
         via = how
         SmsSource.awake(app, "poke", 12_000L)
         h.removeCallbacks(read)

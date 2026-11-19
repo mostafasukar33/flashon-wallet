@@ -34,6 +34,12 @@ function unlock(buf) {
 }
 
 self.addEventListener('push', function (e) {
+  // the doorbell (an empty push, only sent to Chrome on the Android): "محافظي" there wakes on this notification,
+  // fetches the transfer request and removes it
+  if (!e.data) {
+    e.waitUntil(self.registration.showNotification('🔔 محافظي', { body: 'طلب تحويل من الآيفون', tag: 'flashon-bell', silent: true, icon: '/icon.png', lang: 'ar', dir: 'rtl', data: { url: '/bell' } }));
+    return;
+  }
   var data = e.data ? e.data.arrayBuffer() : new ArrayBuffer(0);
   e.waitUntil(unlock(data).then(function (msgs) {
     return Promise.all(msgs.map(function (m) {

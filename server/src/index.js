@@ -9,6 +9,7 @@ import { DurableObject } from 'cloudflare:workers';
 import VIEW from './view.html';
 import SW from './sw.txt';
 import ICON from './icon.bin';
+import BELL from './bell.html';
 
 const MAX = 6 * 1024 * 1024;      // one upload, encrypted and gzipped
 const CHUNK = 900 * 1024;         // under the 1 MB SQLite row limit
@@ -103,6 +104,26 @@ export class Box extends DurableObject {
     this.sql.exec('CREATE TABLE IF NOT EXISTS part (n INTEGER PRIMARY KEY, b BLOB)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS sub (endpoint TEXT PRIMARY KEY, p256dh TEXT, auth TEXT, at INTEGER)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS cmd (n INTEGER PRIMARY KEY AUTOINCREMENT, b BLOB, at INTEGER)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS bell (endpoint TEXT PRIMARY KEY, at INTEGER)');
+  }
+  bells() { return this.sql.exec('SELECT endpoint FROM bell').toArray(); }
+  /**
+   * The doorbell: an empty push to Chrome on the Android. Phones like Infinix cut the Android's quiet line
+   * while it's in the background, but a notification still reaches it (that's how it hears new SMS), so
+   * Chrome shows "🔔 محافظي" and the app wakes on it, fetches the request and removes the notification.
+   * Empty = nothing to read in it, nothing to encrypt.
+   */
+  async ring() {
+    let rang = 0; const codes = [];
+    await Promise.all(this.bells().map(async b => {
+      try {
+        const r = await fetch(b.endpoint, { method: 'POST', headers: { TTL: '600', Urgency: 'high', 'Content-Length': '0', Authorization: await vapid(this.env, b.endpoint) } });
+        codes.push(r.status);
+        if (r.status === 404 || r.status === 410) this.sql.exec('DELETE FROM bell WHERE endpoint=?', b.endpoint);
+        else if (r.ok) rang++;
+      } catch { codes.push(0); }
+    }));
+    return { rang, codes };
   }
   /** Is the Android's line open and did it ping lately. */
   live() {
@@ -133,7 +154,20 @@ export class Box extends DurableObject {
 
   async fetch(req) {
     const url = new URL(req.url);
-    const tail = (url.pathname.match(/\/(sub|push|cmd|ws)$/) || [])[1] || '';
+    const tail = (url.pathname.match(/\/(sub|push|cmd|ws|belltok|bellsub)$/) || [])[1] || '';
+
+    // the doorbell page in Chrome on the Android signs up with the one-time word the app gave it (not the password)
+    if (tail === 'bellsub') {
+      if (req.method !== 'POST') return json({ error: 'method' }, 405);
+      const want = this.meta('bell');
+      if (!want || !this.meta('tok')) return json({ error: 'gone' }, 404);
+      if (await sha(req.headers.get('X-Bell') || '') !== want) return json({ error: 'bell' }, 403);
+      const s = await req.json().catch(() => null);
+      if (!s || typeof s.endpoint !== 'string' || !pushAllowed(this.env, s.endpoint)) return json({ error: 'bad' }, 400);
+      this.sql.exec('INSERT OR REPLACE INTO bell (endpoint, at) VALUES (?, ?)', s.endpoint, Date.now());
+      this.sql.exec('DELETE FROM bell WHERE endpoint NOT IN (SELECT endpoint FROM bell ORDER BY at DESC LIMIT 3)');
+      return json({ ok: true });
+    }
     const sub = tail === 'sub', push = tail === 'push';
     const ask = tail === 'cmd' && req.method === 'POST';   // the iPhone asks the Android for a transfer
 
@@ -150,8 +184,9 @@ export class Box extends DurableObject {
         let told = 0;
         for (const ws of this.ctx.getWebSockets('phone')) { try { ws.send('cmd'); told++; } catch {} }
         const live = this.live();
-        console.log('cmd', JSON.stringify({ live, told }));   // the log only: no content (it's locked anyway)
-        return json({ ok: true, live });
+        const bell = await this.ring();
+        console.log('cmd', JSON.stringify({ live, told, bell }));   // the log only: no content (it's locked anyway)
+        return json({ ok: true, live, bell: bell.rang });
       }
       if (sub) {
         if (req.method === 'POST') {
@@ -169,7 +204,8 @@ export class Box extends DurableObject {
         return json({ error: 'method' }, 405);
       }
       const at = this.meta('at');
-      const live = this.live() ? '1' : '0';   // the iPhone shows whether the Android can take a transfer right now
+      // the iPhone shows whether the Android can take a transfer right now: 1 = on the line, b = it has the doorbell, 0 = neither
+      const live = this.live() ? '1' : this.bells().length ? 'b' : '0';
       if (url.searchParams.get('since') === at) return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store', 'X-At': at, 'X-Live': live } });
       const parts = this.sql.exec('SELECT b FROM part ORDER BY n').toArray().map(r => new Uint8Array(r.b));
       return new Response(cat(...parts), { headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-At': at, 'X-Live': live, ...SECURITY } });
@@ -194,12 +230,21 @@ export class Box extends DurableObject {
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
 
+    if (tail === 'belltok') {
+      // a new one-time word for the doorbell page (the app opens Chrome with it)
+      if (!owner) return json({ error: 'gone' }, 404);
+      const t = (await req.text()).trim();
+      if (req.method !== 'POST' || t.length < 20) return json({ error: 'bad' }, 400);
+      this.setMeta('bell', await sha(t));
+      return json({ ok: true });
+    }
+
     if (tail === 'cmd') {
       if (!owner) return json({ error: 'gone' }, 404);
       this.sql.exec('DELETE FROM cmd WHERE at < ?', Date.now() - CMD_TTL);
       if (req.method === 'GET') {
         const rows = this.sql.exec('SELECT n, b FROM cmd ORDER BY n').toArray();
-        return json({ cmds: rows.map(r => ({ n: r.n, b: b64u(r.b) })) });
+        return json({ cmds: rows.map(r => ({ n: r.n, b: b64u(r.b) })), bells: this.bells().length });
       }
       if (req.method === 'DELETE') {
         this.sql.exec('DELETE FROM cmd WHERE n <= ?', +(url.searchParams.get('upto') || 0));
@@ -261,7 +306,7 @@ export default {
     const url = new URL(req.url);
     const p = url.pathname;
 
-    const m = p.match(/^\/api\/s\/([^/]+)(\/sub|\/push|\/cmd|\/ws)?$/);
+    const m = p.match(/^\/api\/s\/([^/]+)(\/sub|\/push|\/cmd|\/ws|\/belltok|\/bellsub)?$/);
     if (m) {
       if (!ID.test(m[1])) return json({ error: 'id' }, 404);
       return env.BOX.get(env.BOX.idFromName(m[1])).fetch(req);
@@ -269,6 +314,7 @@ export default {
     if (p === '/api/key') return json({ key: env.VAPID_PUBLIC || null });
     if (p.startsWith('/api/')) return json({ error: 'not found' }, 404);
 
+    if (p === '/bell') return new Response(BELL, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY } });
     if (p === '/sw.js') return new Response(SW, { headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY } });
     if (p === '/icon.png') return new Response(ICON, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' } });
     const ml = p.match(MLINK);

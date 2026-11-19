@@ -123,7 +123,7 @@ object Xfer {
         val acc = accOn(ctx)
         return JSONObject().put("perm", perm).put("phone", phonePerm(ctx)).put("acc", acc).put("ready", perm && acc)
             .put("remote", remoteOn(store)).put("code", template(store)).put("def", Ussd.DEFAULT_VF)
-            .put("busy", j != null && !j.done).put("line", Remote.state).put("accounts", accs).put("list", history(store))
+            .put("busy", j != null && !j.done).put("line", Remote.state).put("bell", store.getLong("bell_n") > 0).put("accounts", accs).put("list", history(store))
     }
 
     private fun vfAccounts(led: com.flashon.wallet.core.Ledger) =
@@ -604,6 +604,8 @@ class UssdService : AccessibilityService() {
             val n = e.parcelableData as? Notification
             // a transfer is running and the phone shows Vodafone's answer as a notification
             Xfer.job?.let { j -> if (!j.done) try { Xfer.onNote(this, e.packageName?.toString(), n) } catch (_: Exception) { } }
+            // the doorbell from the iPhone (Chrome's "🔔 محافظي")
+            if (NoteListener.isBell(n)) { WatchService.saw("bell"); Remote.ring(this) }
             if (!NoteListener.connected && NoteListener.maybeSms(this, e.packageName?.toString(), n)) { WatchService.saw("acc"); Poke.now(this, "acc") }
             return
         }

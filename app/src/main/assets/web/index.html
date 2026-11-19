@@ -195,6 +195,7 @@ if (!B) {
     openNoteAccess:function(){mock.listen={on:true,live:true,at:Date.now()};mock.hold.held=false;setTimeout(App.reload,300)},
     askCallPerm:function(){mock.xfer.perm=mock.xfer.phone=true;mock.xfer.ready=mock.xfer.acc;setTimeout(App.reload,200)},
     openAccessibility:function(){mock.xfer.acc=true;mock.xfer.ready=mock.xfer.perm;setTimeout(App.reload,300)},
+    openBell:function(){mock.xfer.bell=true;setTimeout(App.reload,300)},
     setXferRemote:function(on){mock.xfer.remote=on;mock.xfer.line=on?'on':'off';setTimeout(App.reload,100)},
     setXferCode:function(c){mock.xfer.code=c||mock.xfer.def;setTimeout(App.reload,100);return true},
     sendXfer:function(j){var o=JSON.parse(j);setTimeout(function(){mock.xfer.list.unshift({id:'m'+Date.now(),to:o.to,a:+o.a,from:'phone',w:o.w,st:'run',msg:'',at:Date.now(),up:Date.now()});App.onXferSent(true,'');App.reload()},300)},
@@ -759,7 +760,9 @@ function xferSettings(){
   else {
     h+='<label class="switch"><span style="font-size:15px">3. اسمح بالتحويل من الآيفون</span><input type="checkbox" id="s_xrm"'+(x.remote?' checked':'')+'></label>'+
       '<span class="xs mute" style="line-height:1.6">الطلب بيتقفل على الآيفون بنفس باسورد اللينك قبل ما يطلع، والسيرفر ميقدرش يقراه ولا يعمل طلب من عنده. يعني اللي يقدر يحوّل هو اللي معاه اللينك والباسورد والرقم السري بتاع المحفظة. الطلب اللي يتأخر أكتر من 10 دقايق مبيتنفذش.</span>';
-    if (x.remote) h+=(x.line==='on'?'<span class="xs" style="color:var(--in);font-weight:600">✓ متصل بالآيفون ومستني</span>':'<span class="xs mute">بيتصل بالآيفون… (محتاج نت)</span>')+
+    if (x.remote) h+=(x.bell?'<span class="xs" style="color:var(--in);font-weight:600;line-height:1.6">✓ الجرس شغال: الآيفون بيصحّي الموبايل ده بإشعار من كروم لما تحوّل منه</span>':
+      '<div class="alert mid"><b>4. 🔔 شغّل الجرس (مرة واحدة)</b><span style="line-height:1.7">الموبايل ده بيقطع نت «محافظي» وهو في الخلفية، فطلب الآيفون مش بيوصله. الجرس بيخلي الآيفون يصحّيه بإشعار من كروم، و«محافظي» بيشيل الإشعار لوحده ويحوّل.</span>'+
+      '<button class="btn main" data-act="bell">شغّل الجرس</button><span class="xs" style="line-height:1.6">هيفتح كروم: دوس «شغّل الجرس» ووافق على الإشعارات «سماح» '+en('Allow')+'، وارجع هنا.</span></div>')+
       '<span class="xs mute" style="line-height:1.6">على الأندرويد اللي في البيت: سيبه على الشاحن والنت. ولو عليه قفل شاشة بباسورد أو بصمة، شاشة فودافون ممكن متظهرش وهو مقفول، فجرّب تحويل صغير الأول وهو مقفول.</span>';
   }
   h+='<button class="btn ghost" data-act="xfer">جرّب تحويل</button>'+
@@ -784,6 +787,7 @@ function xferSheet(){
   if (VIEW) {
     var live=B.live?B.live():'';
     h+=(live==='1'?'<span class="xs" style="color:var(--in);font-weight:600">✓ الأندرويد متصل دلوقتي</span>':
+      live==='b'?'<span class="xs" style="color:var(--in);font-weight:600">🔔 الأندرويد هيصحى بالجرس ويحوّل في ثواني</span>':
       live==='0'?'<span class="xs" style="color:var(--day);font-weight:600;line-height:1.6">⚠️ الأندرويد مش متصل دلوقتي (مفيش نت عليه؟). الطلب هيستنى 10 دقايق، ولو مااتصلش مش هيتنفذ.</span>':'');
     if (!x.ready) h+='<div class="alert mid"><b>الأندرويد لسه محتاج إعداد</b><span style="line-height:1.7">على الأندرويد: الإعدادات ← «التحويل من التطبيق ومن الآيفون»، واسمح بالمكالمات وشغّل «التحويل التلقائي».</span></div>';
   } else if (!x.ready) h+='<div class="alert mid"><b>قبل أول تحويل</b>'+xferSteps()+'</div>';
@@ -1028,6 +1032,7 @@ document.addEventListener('click', function(e){
     case 'powersave': if (B.openPowerSaving) B.openPowerSaving(); break;
     case 'fixhold': openSheet('<h2>علشان التحويل يوصل في نفس اللحظة</h2>'+holdSteps()); break;
     case 'smsapp': if (B.askSmsApp) B.askSmsApp(); break;
+    case 'bell': if (B.openBell) B.openBell(); break;
     case 'noteacc': S.noteTried=true; if (B.openNoteAccess) B.openNoteAccess(); break;
     case 'callperm': if (B.askCallPerm) B.askCallPerm(); break;
     case 'accset': S.accTried=true; if (B.openAccessibility) B.openAccessibility(); break;

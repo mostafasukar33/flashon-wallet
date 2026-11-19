@@ -569,6 +569,19 @@ class MainActivity : Activity() {
             }
         }
 
+        /** The doorbell: Chrome on this phone signs up once, and the iPhone wakes «محافظي» through it. */
+        @JavascriptInterface
+        fun openBell() {
+            Thread {
+                val url = Remote.bellPage(this@MainActivity)
+                main.post {
+                    if (url == null) { Toast.makeText(this@MainActivity, "مفيش نت، جرّب تاني", Toast.LENGTH_SHORT).show(); return@post }
+                    val i = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    try { startActivity(Intent(i).setPackage("com.android.chrome")) } catch (_: Exception) { try { startActivity(i) } catch (_: Exception) { } }
+                }
+            }.start()
+        }
+
         /** Transfers asked from the iPhone: on or off (needs the link on). */
         @JavascriptInterface
         fun setXferRemote(on: Boolean) {

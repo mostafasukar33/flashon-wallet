@@ -46,6 +46,8 @@ object Remote {
         }
         if (upto > 0) try { Sync.call("DELETE", "/api/s/$id/cmd?upto=$upto", store) } catch (_: Exception) { }
         store.putLong("rm_fetch", System.currentTimeMillis())
+        // how many doorbells (Chrome on this phone) the server can ring: shown in the settings
+        try { val n = JSONObject(r.second).optLong("bells", -1); if (n >= 0 && n != store.getLong("bell_n")) { store.putLong("bell_n", n); MainActivity.refreshIfOpen() } } catch (_: Exception) { }
     }
 
     private fun run(app: Context, store: Store, sealed: ByteArray) {
@@ -80,6 +82,40 @@ object Remote {
         for (i in 0 until minOf(arr.length(), 99)) out.put(arr.optString(i))
         store.putStr("rm_seen", out.toString())
         return false
+    }
+
+    // ---------- the doorbell ----------
+
+    /** The title of the doorbell notification Chrome shows (server/src/sw.txt). */
+    const val BELL_TITLE = "🔔 محافظي"
+
+    /**
+     * A new one-time word for the doorbell page, registered on the server; returns the page to open in Chrome
+     * (/bell#<id>.<word>), or null without internet. Blocking.
+     */
+    fun bellPage(ctx: Context): String? {
+        val store = Store(ctx)
+        val id = store.getStr("sync_id") ?: return null
+        val word = Sync.randomWord()
+        val r = try { Sync.call("POST", "/api/s/$id/belltok", store, word.toByteArray(Charsets.US_ASCII)) } catch (_: Exception) { return null }
+        return if (r.first == 200) Sync.HOST + "/bell#" + id + "." + word else null
+    }
+
+    /** The doorbell rang (or something woke the app): fetch the requests now, and open the line again. */
+    fun ring(ctx: Context) {
+        val app = ctx.applicationContext
+        if (!enabled(Store(app))) return
+        lastPoke = System.currentTimeMillis()
+        val wl = SmsSource.awake(app, "bell", 60_000L)
+        Thread { try { fetch(app); keep(app) } catch (_: Exception) { } finally { try { if (wl.isHeld) wl.release() } catch (_: Exception) { } } }.start()
+    }
+
+    @Volatile private var lastPoke = 0L
+
+    /** Any notification woke the app (a new SMS…): a quick look for requests too, at most every 30 seconds. */
+    fun poke(ctx: Context) {
+        if (System.currentTimeMillis() - lastPoke < 30_000L) return
+        ring(ctx)
     }
 
     // ---------- the quiet connection ----------
