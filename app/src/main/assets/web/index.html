@@ -788,7 +788,8 @@ function xferSheet(){
     if (!x.ready) h+='<div class="alert mid"><b>الأندرويد لسه محتاج إعداد</b><span style="line-height:1.7">على الأندرويد: الإعدادات ← «التحويل من التطبيق ومن الآيفون»، واسمح بالمكالمات وشغّل «التحويل التلقائي».</span></div>';
   } else if (!x.ready) h+='<div class="alert mid"><b>قبل أول تحويل</b>'+xferSteps()+'</div>';
   if (S.xfAsk) {
-    h+='<div class="card col" style="gap:6px;font-size:16px;line-height:1.8"><span>هيتحوّل <b class="num">'+fmt(+f.a)+'</b> ج</span><span>لـ <b class="num">'+esc(f.to)+'</b></span><span>من <b>'+esc(xferLineName(acc))+'</b>'+(acc.own?' <span class="num">'+esc(acc.own)+'</span>':'')+'</span><span class="small mute">الرسوم بتتخصم من المحفظة دي زي العادي.</span></div>'+
+    h+='<div class="card col" style="gap:6px;font-size:16px;line-height:1.8"><span>هيتحوّل <b class="num">'+fmt(+f.a)+'</b> ج</span><span>لـ <b class="num">'+esc(f.to)+'</b></span><span>من <b>'+esc(xferLineName(acc))+'</b>'+(acc.own?' <span class="num">'+esc(acc.own)+'</span>':'')+'</span><span class="small mute">الرسوم بتتخصم من المحفظة دي زي العادي.</span>'+
+      (acc.own&&acc.own===f.to?'<span class="small" style="color:var(--day);font-weight:600">⚠️ الرقم ده هو رقم المحفظة اللي بتحوّل منها نفسها (حسب رسايل فودافون)، وفودافون غالباً هترفضه.</span>':'')+'</div>'+
       '<div class="grid2"><button class="btn main" data-act="xgo" id="xgo">أيوه حوّل</button><button class="btn ghost" data-act="xback">رجوع</button></div>';
     openSheet(h); return;
   }
@@ -825,7 +826,6 @@ function xferCheck(f){
   if (!to) return 'اكتب رقم موبايل مصري صح';
   if (!/^[0-9]+$/.test(a) || +a<1 || +a>60000) return 'المبلغ جنيهات صحيحة من 1 لـ 60,000';
   if (!/^[0-9]{4,8}$/.test(f.pin)) return 'الرقم السري أرقام بس';
-  var acc=xferAcc(); if (acc && acc.own && acc.own===to) return 'ده رقم المحفظة نفسها اللي بتحوّل منها، اختار رقم تاني';
   f.to=to; f.a=String(+a); return '';
 }
 
