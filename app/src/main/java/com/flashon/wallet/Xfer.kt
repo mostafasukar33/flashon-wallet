@@ -56,6 +56,7 @@ object Xfer {
     private const val CH = "xfer"
     private const val NOTE = 7100
     private const val TIMEOUT = 75_000L
+    private const val SILENT_OFF = "ussd_silent_off2"
     private const val KEEP = 20
     private val main = Handler(Looper.getMainLooper())
     private val rnd = SecureRandom()
@@ -264,39 +265,48 @@ object Xfer {
 
     /**
      * The transfer with no screen at all, so it works with the phone locked: Android sends the code and hands
-     * back Vodafone's answer as text, one answer per code. Vodafone asks one thing at a time (page 1 "0:مزيد",
-     * then the PIN), so the answers go in the same code joined with "*" (*9*7*number*amount*0*PIN#).
-     * The PIN is added only after the same code without it came back asking for the PIN, so it can never land
-     * on another question. Returns false to do it the usual way (nothing typed yet then); true when it's over.
+     * back Vodafone's answer as text, one answer per code. The PIN goes in the same code after "*"
+     * (*9*7*number*amount*PIN#), and only after the same code without it came back with Vodafone's PIN question
+     * for this same number and amount (page 1 of it is enough: in one code the "0:مزيد" pages take no key, the
+     * next answer goes to the question), so it can never land on another question.
+     * Returns false to do it the usual way (nothing typed yet then); true when it's over.
      */
     private fun silent(app: Context, store: Store, j: Job): Boolean {
-        // off for a day after it didn't work on this phone (a network hiccup shouldn't turn it off for good)
-        if (Build.VERSION.SDK_INT < 26 || System.currentTimeMillis() - store.getLong("ussd_silent_off") < 24 * 3600_000L || !j.code.endsWith("#")) return false
+        // off for a day after it didn't work on this phone (a network hiccup shouldn't turn it off for good).
+        // "ussd_silent_off" was the old one, set by the "*0" page key that Vodafone read as a PIN: not read any more
+        if (Build.VERSION.SDK_INT < 26 || System.currentTimeMillis() - store.getLong(SILENT_OFF) < 24 * 3600_000L || !j.code.endsWith("#")) return false
         val base = j.code.dropLast(1)
         j.log("بيطلب الكود من غير شاشة")
-        val p = Ussd.probe(base, { code -> if (j.done) null else ussd(app, j.sub, code).also { if (it != null && it.first) j.seen = true } }, { j.log(it) })
+        val p = Ussd.probe(base, j.to, j.amount, { code -> if (j.done) null else ussd(app, j.sub, code).also { if (it != null && it.first) j.seen = true } }, { j.log(it) })
         if (p is Ussd.Probe.No) {
             j.log(p.why)
-            if (p.off) store.putLong("ussd_silent_off", System.currentTimeMillis())
+            if (p.off) store.putLong(SILENT_OFF, System.currentTimeMillis())
             return j.done
         }
         val pin = (p as Ussd.Probe.Pin).let { j.takePin() } ?: return false
         // the next thing Vodafone expects is the PIN: from here on it's never sent a second time
         j.pinSent = true
-        j.log("بعت الرقم السري من غير شاشة")
-        val r = ussd(app, j.sub, base + p.keys + "*" + pin + "#", 45_000L)
+        j.log("بعت الرقم السري في نفس الكود من غير شاشة")
+        val r = ussd(app, j.sub, "$base*$pin#", 45_000L)
         if (r == null || !r.first) { end(app, j, "unsure", "فودافون مردتش. لو رسالة فودافون جت، التحويل هيتأكد لوحده"); return true }
         j.log("فودافون (من غير شاشة): " + r.second)
+        if (Ussd.pinPage1(r.second, j.to, j.amount)) {
+            // the same question again with no error: the PIN in the code was skipped, so nothing was transferred
+            store.putLong(SILENT_OFF, System.currentTimeMillis())
+            end(app, j, "fail", "فودافون رجّعت نفس السؤال ومخدتش الرقم السري من الكود، فالتحويل ماتمش. التحويل الجاي هيتعمل بالشاشة")
+            return true
+        }
         when (val v = Ussd.verdict(r.second, j.to, p.before)) {
             "stop" -> {
                 // a confirmation after the PIN: this time it stops, the next ones the usual way for a day
-                store.putLong("ussd_silent_off", System.currentTimeMillis())
+                store.putLong(SILENT_OFF, System.currentTimeMillis())
                 end(app, j, "stop", r.second + " (فودافون طلبت تأكيد، التحويل الجاي هيتعمل بالشاشة)")
             }
             else -> end(app, j, v, r.second)
         }
         return true
     }
+
 
     /** "مقفول بباسورد" / "مقفول من غير باسورد" / "مفتوح": for the step-by-step list. */
     private fun lockState(ctx: Context): String = try {
