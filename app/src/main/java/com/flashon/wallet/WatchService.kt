@@ -34,7 +34,7 @@ import android.provider.Telephony
  */
 class WatchService : Service() {
     companion object {
-        private const val CH = "watch"
+        private const val CH = "watch2"   // "watch" was MIN importance: no icon at the top, so it looked like nothing was running
         private const val NOTE_ID = 7001
         @Volatile var running = false
             private set
@@ -70,7 +70,8 @@ class WatchService : Service() {
     private fun note(): Notification {
         val nm = getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CH) == null) {
-            nm.createNotificationChannel(NotificationChannel(CH, "محافظي شغال", NotificationManager.IMPORTANCE_MIN).apply {
+            try { nm.deleteNotificationChannel("watch") } catch (_: Exception) { }
+            nm.createNotificationChannel(NotificationChannel(CH, "محافظي شغال", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "علشان التحويلات توصل الموبايل التاني في نفس اللحظة"
                 setShowBadge(false)
             })

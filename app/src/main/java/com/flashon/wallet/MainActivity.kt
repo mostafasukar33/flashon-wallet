@@ -31,6 +31,7 @@ class MainActivity : Activity() {
         private var current: WeakReference<MainActivity>? = null
         fun refreshIfOpen() { current?.get()?.reloadUi() }
         private const val REQ_SMS = 11
+        private const val REQ_NOTE = 12
     }
 
     private lateinit var web: WebView
@@ -81,10 +82,20 @@ class MainActivity : Activity() {
         Notifier.scheduleMonthStart(this)
     }
 
+    private var askedNotif = false
+    /** Android 13+: without this permission the app shows nothing, not even the "محافظي شغال" line. Asked once per opening. */
+    private fun askNotifications() {
+        if (askedNotif || Build.VERSION.SDK_INT < 33 || !SmsSource.hasPermission(this)) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        askedNotif = true
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTE)
+    }
+
     override fun onResume() {
         super.onResume()
         // pick up anything missed while the app was closed, then redraw
         WatchService.start(this)
+        askNotifications()
         Thread {
             try { SmsSource.catchUp(this, "open") } catch (_: Exception) { }   // what came while closed; the other phone hears about it too
             reloadUi()
@@ -135,6 +146,7 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_NOTE) { WatchService.start(this); reloadUi(); return }   // shows the "محافظي شغال" line now
         if (requestCode == REQ_SMS) {
             if (!SmsSource.hasPermission(this)) {
                 Toast.makeText(this, "من غير الإذن ده التطبيق مش هيقدر يقرا الرسايل", Toast.LENGTH_LONG).show()
@@ -316,6 +328,15 @@ class MainActivity : Activity() {
                     try { startActivity(Intent().setComponent(c).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return@post } catch (_: Exception) { }
                 }
                 try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: Exception) { }
+            }
+        }
+
+        /** The app's notification settings (when the permission was refused for good, only from there). */
+        @JavascriptInterface
+        fun openNotif() {
+            main.post {
+                try { startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)) }
+                catch (_: Exception) { try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: Exception) { } }
             }
         }
 

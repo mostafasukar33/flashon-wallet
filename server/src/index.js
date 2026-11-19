@@ -184,6 +184,7 @@ export class Box extends DurableObject {
         this.setMeta('sub', ph);
         this.setMeta('at', at);
       });
+      console.log('put', req.headers.get('X-Diag') || '');   // the log only: the phone's state (no numbers)
       return json({ ok: true, at });
     }
     return json({ error: 'method' }, 405);

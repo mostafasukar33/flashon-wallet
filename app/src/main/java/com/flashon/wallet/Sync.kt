@@ -110,6 +110,17 @@ object Sync {
     @Volatile var lag = 0L
     @Volatile var diag = ""
 
+    /** The phone's state for the server log (no numbers or messages): Android version, maker, battery saving, the watcher, notifications. */
+    fun diagOf(ctx: Context): String {
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+        return "sdk=" + android.os.Build.VERSION.SDK_INT + ";maker=" + android.os.Build.MANUFACTURER.take(20) +
+            ";bat=" + (if (pm.isIgnoringBatteryOptimizations(ctx.packageName)) 1 else 0) +
+            ";watch=" + (if (WatchService.running) 1 else 0) +
+            ";notif=" + (if (nm.areNotificationsEnabled()) 1 else 0) +
+            ";v=" + try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode } catch (_: Exception) { 0 }
+    }
+
     private const val PENDING_MAX_AGE = 6 * 60 * 60 * 1000L
     private val PENDING_LOCK = Any()
 
@@ -170,7 +181,7 @@ object Sync {
         try {
             val o = JSONObject(screenJson ?: DataJson.build(ctx, store))
             // the other phone only looks: drop what belongs to this phone alone
-            o.remove("sync"); o.remove("update"); o.remove("batteryOk"); o.remove("watch")
+            o.remove("sync"); o.remove("update"); o.remove("batteryOk"); o.remove("watch"); o.remove("notifOk")
             // full message text, so opening a transaction there shows the SMS too
             val ids = HashSet<String>()
             val txs = o.optJSONArray("txs")
@@ -190,7 +201,7 @@ object Sync {
 
             val wrapped = JSONObject().put("t", System.currentTimeMillis()).put("data", o).toString()
             val gz = ByteArrayOutputStream().also { bo -> GZIPOutputStream(bo).use { it.write(wrapped.toByteArray(Charsets.UTF_8)) } }.toByteArray()
-            val code = send("PUT", "/api/s/$id", store, seal(store, 1, gz))
+            val code = send("PUT", "/api/s/$id", store, seal(store, 1, gz), mapOf("X-Diag" to try { diagOf(ctx) } catch (_: Exception) { "" }))
             if (code in 200..299) {
                 store.putStr("sync_hash", hash)
                 store.putLong("sync_ok", System.currentTimeMillis())

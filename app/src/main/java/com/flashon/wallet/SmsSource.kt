@@ -93,8 +93,7 @@ object SmsSource {
         if (fresh.isNotEmpty()) {
             // how it was caught and how late (seconds), sent along so the server log shows where a delay comes from
             Sync.via = via; Sync.lag = ((now - fresh.minOf { it.time }) / 1000).coerceAtLeast(0)
-            Sync.diag = "bat=" + (if ((ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)) 1 else 0) +
-                ";watch=" + (if (WatchService.running) 1 else 0)
+            Sync.diag = try { Sync.diagOf(ctx) } catch (_: Exception) { "" }
             // the other phone first: read the new SMS alone and send, before the full ledger is built
             val sent = if (Sync.isOn(store)) Notifier.quick(store, fresh).also { Sync.notify(ctx, store, it) } else emptyList()
             val msgs = Notifier.announce(ctx, store, fresh.map { it.id })
