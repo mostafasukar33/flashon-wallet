@@ -41,6 +41,7 @@ class MainActivity : Activity() {
         private const val REQ_ROLE = 13
         private const val REQ_CONTACTS = 14
         private const val REQ_SEND = 15
+        private const val REQ_CALL = 16
     }
 
     private lateinit var web: WebView
@@ -153,6 +154,7 @@ class MainActivity : Activity() {
         resumed = true
         // pick up anything missed while the app was closed, then redraw
         WatchService.start(this)
+        NoteListener.rebind(this)
         askNotifications()
         Thread {
             try { SmsSource.catchUp(this, "open") } catch (_: Exception) { }   // what came while closed; the other phone hears about it too
@@ -229,6 +231,7 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_CONTACTS) { smsChanged(); return }
+        if (requestCode == REQ_CALL) { reloadUi(); return }
         if (requestCode == REQ_SEND) { js("window.App&&App.onSendPerm&&App.onSendPerm(" + (checkSelfPermission(Manifest.permission.SEND_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED) + ")"); return }
         if (requestCode == REQ_NOTE) { WatchService.start(this); reloadUi(); return }   // shows the "محافظي شغال" line now
         if (requestCode == REQ_SMS) {
@@ -248,6 +251,10 @@ class MainActivity : Activity() {
         for (i in listOf(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS), Intent(Settings.ACTION_SETTINGS))) {
             try { startActivity(i); return } catch (_: Exception) { }
         }
+    }
+
+    private fun openAppInfoNow() {
+        try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: Exception) { }
     }
 
     private fun openApkInBrowser() {
@@ -330,6 +337,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun setSync(on: Boolean, password: String) {
             if (on && password.length < 6) return
+            if (!on) { store.putLong("xfer_remote", 0); Remote.stop(this@MainActivity) }   // no link = no transfers from the iPhone
             Thread {
                 if (on) Sync.enable(this@MainActivity, store, password) else Sync.disable(store)
                 reloadUi()
@@ -470,10 +478,81 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun openDefaultApps() { main.post { openDefaultAppsNow() } }
 
-        /** The app's info page: from there ⋮ → "Allow restricted settings" when Android blocks the SMS app question. */
+        /** The app's info page: from there ⋮ → "Allow restricted settings" when Android blocks the SMS app question,
+         *  notification access or «التحويل التلقائي» for an app installed from outside the store. */
         @JavascriptInterface
-        fun openAppInfo() {
-            main.post { try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: Exception) { } }
+        fun openAppInfo() { main.post { openAppInfoNow() } }
+
+        // ---------- notification access (the fix that keeps the phone's SMS app) ----------
+
+        /** Android's page with the «محافظي» switch for notification access. */
+        @JavascriptInterface
+        fun openNoteAccess() {
+            main.post {
+                for (i in NoteListener.settingsIntents(this@MainActivity)) {
+                    try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return@post } catch (_: Exception) { }
+                }
+                openAppInfoNow()
+            }
+        }
+
+        // ---------- Vodafone Cash transfers by code ----------
+
+        /** "Make and manage phone calls": dialing the code, and picking the wallet's SIM. */
+        @JavascriptInterface
+        fun askCallPerm() {
+            main.post { requestPermissions(arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE), REQ_CALL) }
+        }
+
+        /** «التحويل التلقائي» in Android's accessibility settings (its own page when the phone has one). */
+        @JavascriptInterface
+        fun openAccessibility() {
+            main.post {
+                val tries = ArrayList<Intent>()
+                if (Build.VERSION.SDK_INT >= 31) tries += Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
+                    .putExtra(Intent.EXTRA_COMPONENT_NAME, Xfer.accComponent(this@MainActivity).flattenToString())
+                tries += Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                for (i in tries) try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return@post } catch (_: Exception) { }
+            }
+        }
+
+        /** Transfers asked from the iPhone: on or off (needs the link on). */
+        @JavascriptInterface
+        fun setXferRemote(on: Boolean) {
+            store.putLong("xfer_remote", if (on && Sync.isOn(store)) 1 else 0)
+            if (on) Remote.keep(this@MainActivity) else Remote.stop(this@MainActivity)
+            reloadUi()
+        }
+
+        /** The transfer code, with {n} for the number and {a} for the amount. Empty = back to the usual one. */
+        @JavascriptInterface
+        fun setXferCode(code: String): Boolean {
+            val c = code.trim().replace(" ", "")
+            if (c.isNotEmpty() && com.flashon.wallet.core.Ussd.code(c, "01000000000", 1) == null) return false
+            if (c.isEmpty() || c == com.flashon.wallet.core.Ussd.DEFAULT_VF) store.remove("xfer_code") else store.putStr("xfer_code", c)
+            reloadUi()
+            return true
+        }
+
+        /** A transfer from this phone's screen: {to, a, pin, w}. The answer comes in App.onXferSent. */
+        @JavascriptInterface
+        fun sendXfer(json: String) {
+            val o = try { JSONObject(json) } catch (_: Exception) { return }
+            Thread {
+                val why = try {
+                    Xfer.start(this@MainActivity, o.optString("to"), o.optString("a"), o.optString("pin"), o.optString("w"), "phone", Xfer.newId())
+                } catch (e: Exception) { "حصلت مشكلة: " + e.javaClass.simpleName }
+                js("window.App&&App.onXferSent&&App.onXferSent(" + (why == null) + "," + JSONObject.quote(why ?: "") + ")")
+            }.start()
+        }
+
+        /** Without «التحويل التلقائي»: opens the dialer with the code written, and the user types the PIN in Vodafone's screen. */
+        @JavascriptInterface
+        fun dialXfer(to: String, amount: String) {
+            val n = com.flashon.wallet.core.Ussd.mobile(to) ?: return
+            val a = com.flashon.wallet.core.Ussd.amount(amount) ?: return
+            val code = com.flashon.wallet.core.Ussd.code(Xfer.template(store), n, a) ?: return
+            main.post { try { startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", code, null))) } catch (_: Exception) { } }
         }
 
         /** Conversations, arrives through App.onThreads. */

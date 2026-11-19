@@ -24,8 +24,40 @@ const sample = (balance) => ({ t: Date.now() - 120000, data: {
   now: [{w: 'vf', p: 'vf', own: '01000000000', label: 'فودافون كاش', hasData: true, balance, lastTime: Date.now(), monthReceived: 7000, monthSent: 500, daySent: 0, dayReceived: 0, receiveLeft: 193000, sendLeftMonth: 199500, sendLeftDay: 60000, receiveLeftDay: null, canSendNow: balance, locked: 0, limits: {monthReceive: 200000, monthSend: 200000, daySend: 60000, own: false}}],
   summaries: {'2026-11': {vf: {inTotal: 7000, outTotal: 500, fees: 0, count: 2, start: 0, end: balance, received: 7000, sent: 500}}},
   txs: [{id: 'a1', w: 'vf', p: 'vf', type: 'in', kind: 'استلام', amount: 7000, fee: 0, balance, phone: '01011112222', name: 'تجربة', smsName: 'تجربة', time: Date.now() - 3600000, how: 'words'}],
-  unknown: [], bodies: {a1: 'رسالة تجربة: تم استلام مبلغ 7000 جنيه'}
+  unknown: [], bodies: {a1: 'رسالة تجربة: تم استلام مبلغ 7000 جنيه'},
+  xfer: {ready: true, remote: true, busy: false, accounts: [{w: 'vfs3', label: 'فودافون كاش', own: '01000000000', can: balance, bal: balance}], list: []}
 }});
+
+/* طلب التحويل من الآيفون: نفس view.html (نسخة 3، ومربوط بالاستخدام ده) */
+const AAD = Buffer.from('flashon-cmd-v3');
+function sealCmd(key, obj) { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', key, iv); c.setAAD(AAD); return Buffer.concat([Buffer.from([3]), iv, c.update(JSON.stringify(obj)), c.final(), c.getAuthTag()]); }
+function openCmd(key, b) { const d = crypto.createDecipheriv('aes-256-gcm', key, b.subarray(1, 13)); d.setAAD(AAD); d.setAuthTag(b.subarray(b.length - 16)); return JSON.parse(Buffer.concat([d.update(b.subarray(13, b.length - 16)), d.final()])); }
+
+/* الخط الهادي بتاع الأندرويد (WebSocket بتوكن الموبايل، زي Ws.kt) */
+function wsOpen(port, path, tok) {
+  return new Promise((ok, no) => {
+    const req = http.request({host: '127.0.0.1', port, path, headers: {Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Key': crypto.randomBytes(16).toString('base64'), 'Sec-WebSocket-Version': '13', Authorization: 'Bearer ' + tok}});
+    req.on('response', r => no(new Error('status ' + r.statusCode)));
+    req.on('upgrade', (res, sock, head) => {
+      let buf = head || Buffer.alloc(0); const q = [], waiters = [];
+      sock.on('data', d => {
+        buf = Buffer.concat([buf, d]);
+        for (;;) {
+          if (buf.length < 2) break;
+          let len = buf[1] & 127, off = 2;
+          if (len === 126) { if (buf.length < 4) break; len = buf.readUInt16BE(2); off = 4; }
+          if (buf.length < off + len) break;
+          const op = buf[0] & 15, text = buf.subarray(off, off + len).toString(); buf = buf.subarray(off + len);
+          if (op === 1) { const w = waiters.shift(); w ? w(text) : q.push(text); }
+        }
+      });
+      const send = t => { const b = Buffer.from(t), m = crypto.randomBytes(4); sock.write(Buffer.concat([Buffer.from([0x81, 0x80 | b.length]), m, Buffer.from(b.map((x, i) => x ^ m[i % 4]))])); };
+      ok({send, next: () => new Promise((r, j) => { if (q.length) return r(q.shift()); waiters.push(r); setTimeout(() => j(new Error('مفيش رد')), 5000); }),
+        close: () => { try { sock.write(Buffer.from([0x88, 0x80, 1, 2, 3, 4])); } catch (e) {} sock.end(); }});
+    });
+    req.on('error', no); req.end();
+  });
+}
 
 (async () => {
   // مفاتيح VAPID تجريبية
@@ -72,6 +104,34 @@ const sample = (balance) => ({ t: Date.now() - 120000, data: {
     for (let i = 0; i < 10; i++) await fetch(U + '/api/s/' + L2.id, {headers: viewer('guess' + i + 'xxxxxxxxxxxxxxxxxxxxxxxx')});
     eq('بعد 10 غلط بيقفل', (await fetch(U + '/api/s/' + L2.id, {headers: viewer(L2.proof)})).status, 429);
     eq('واللينك التاني مش متأثر', (await fetch(S, {headers: viewer()})).status, 200);
+
+    console.log('التحويل من الآيفون');
+    const C = S + '/cmd';
+    const cmd1 = {k: 'xfer', id: 'abcdef123456', t: Date.now(), to: '01012345678', a: '500', pin: '123456', w: 'vfs3'};
+    eq('طلب من غير باسورد مرفوض', (await fetch(C, {method: 'POST', body: sealCmd(L.key, cmd1)})).status, 403);
+    eq('طلب بشكل غلط مرفوض', (await fetch(C, {method: 'POST', headers: viewer(), body: seal(L.key, 2, Buffer.from('[]'))})).status, 400);
+    eq('الخط بتوكن غلط مرفوض', await wsOpen(PORT, '/api/s/' + L.id + '/ws', b64(crypto.randomBytes(24))).then(() => 'opened', e => e.message), 'status 403');
+    eq('الخط من غير WebSocket مرفوض', (await fetch(S + '/ws', {headers: phone()})).status, 426);
+    const ws = await wsOpen(PORT, '/api/s/' + L.id + '/ws', L.tok);
+    ws.send('ping'); eq('السيرفر بيرد على البينج', await ws.next(), 'pong');
+    const pr2 = await (await fetch(C, {method: 'POST', headers: viewer(), body: sealCmd(L.key, cmd1)})).json();
+    eq('الطلب اتقبل والأندرويد متصل', pr2.live, true);
+    eq('الأندرويد سمع "cmd" في نفس اللحظة', await ws.next().catch(e => e.message), 'cmd');
+    eq('الآيفون ميقدرش يقرا الطلبات', (await fetch(C, {headers: viewer()})).status, 401);
+    eq('موبايل تاني ميقدرش يقرا الطلبات', (await fetch(C, {headers: phone(b64(crypto.randomBytes(24)))})).status, 403);
+    const lst = await (await fetch(C, {headers: phone()})).json();
+    eq('الأندرويد بيجيب الطلب', lst.cmds.length, 1);
+    const raw1 = Buffer.from(lst.cmds[0].b, 'base64url'), got1 = openCmd(L.key, raw1);
+    eq('… ويفتحه بالمفتاح', got1.to + '/' + got1.a + '/' + got1.pin, '01012345678/500/123456');
+    eq('السيرفر شايف بايتات مقفولة بس', raw1.includes(Buffer.from('01012345678')) || raw1.includes(Buffer.from('123456')), false);
+    eq('الأندرويد بيمسحه بعد ما يشوفه', (await fetch(C + '?upto=' + lst.cmds[0].n, {method: 'DELETE', headers: phone()})).status, 200);
+    eq('… ومفيش حاجة تاني', (await (await fetch(C, {headers: phone()})).json()).cmds.length, 0);
+    eq('صفحة الآيفون بتعرف إن الأندرويد متصل', (await fetch(S, {headers: viewer()})).headers.get('x-live'), '1');
+    ws.close(); await new Promise(r => setTimeout(r, 500));
+    eq('… ولما يقفل بتعرف', (await fetch(S, {headers: viewer()})).headers.get('x-live'), '0');
+    eq('طلب والأندرويد مش متصل بيستنى', (await (await fetch(C, {method: 'POST', headers: viewer(), body: sealCmd(L.key, {...cmd1, id: 'second123456'})})).json()).live, false);
+    eq('… ويلاقيه أول ما يتصل', (await (await fetch(C, {headers: phone()})).json()).cmds.length, 1);
+    await fetch(C + '?upto=999', {method: 'DELETE', headers: phone()});
 
     console.log('الإشعارات');
     const ua = crypto.createECDH('prime256v1'); ua.generateKeys(); const auth = crypto.randomBytes(16);
@@ -152,11 +212,39 @@ const sample = (balance) => ({ t: Date.now() - 120000, data: {
     const opened = sw && await sw.evaluate(a => unlock(new Uint8Array(a).buffer).then(x => x[0].title), sealedPush);
     eq('الإشعار بيتفتح على الآيفون', opened, '+7,000 ج من تجربة');
     await pg.screenshot({path: (process.env.SHOT || '/tmp/wallet') + '-view.png'});
+    // التحويل من الآيفون: الصفحة بتقفل الطلب بالمفتاح وتبعته، والأندرويد بيسمع ويفتحه
+    const ws2 = await wsOpen(PORT, '/api/s/' + L.id + '/ws', L.tok);
+    await pg.evaluate(() => App.reload()); await pg.waitForTimeout(800);
+    eq('زرار التحويل ظاهر على الآيفون', await pg.isVisible('[data-act=xfer]'), true);
+    await pg.click('[data-act=xfer]'); await pg.waitForTimeout(400);
+    eq('بيقول إن الأندرويد متصل', (await pg.innerText('#sheet')).includes('الأندرويد متصل دلوقتي'), true);
+    await pg.fill('#xf_to', '٠١٠ ١٢٣٤ ٥٦٧٨'); await pg.fill('#xf_a', '750'); await pg.fill('#xf_pin', '654321');
+    await pg.click('[data-act=xnext]'); await pg.waitForTimeout(300);
+    eq('بيأكد الرقم والمبلغ قبل ما يبعت', /750[\s\S]*01012345678/.test(await pg.innerText('#sheet')), true);
+    await pg.screenshot({path: (process.env.SHOT || '/tmp/wallet') + '-xfer.png'});
+    await pg.click('[data-act=xgo]');
+    eq('الأندرويد سمع الطلب', await ws2.next().catch(e => e.message), 'cmd');
+    const l2 = await (await fetch(C, {headers: phone()})).json();
+    const c2 = l2.cmds.length && openCmd(L.key, Buffer.from(l2.cmds[l2.cmds.length - 1].b, 'base64url'));
+    eq('الطلب اتفتح على الأندرويد صح', c2 && [c2.k, c2.to, c2.a, c2.pin, c2.w].join('/'), 'xfer/01012345678/750/654321/vfs3');
+    eq('… وجديد', c2 && Math.abs(Date.now() - c2.t) < 60000, true);
+    await pg.waitForFunction(() => document.body.innerText.includes('اتبعت للأندرويد'), null, {timeout: 5000}).catch(() => {});
+    eq('الآيفون بيعرض إنه اتبعت', (await pg.innerText('body')).includes('اتبعت للأندرويد'), true);
+    eq('الرقم السري مش محفوظ على الآيفون', await pg.evaluate(() => JSON.stringify(localStorage).includes('654321')), false);
+    // الأندرويد خلّص ورفع النتيجة
+    const done = sample(8713.7); done.data.xfer.list = [{id: c2.id, to: '01012345678', a: 750, from: 'iphone', w: 'vfs3', st: 'ok', msg: 'تم تحويل 750 جنيه بنجاح', at: Date.now(), up: Date.now()}];
+    await fetch(S, {method: 'PUT', headers: phone(), body: seal(L.key, 1, zlib.gzipSync(Buffer.from(JSON.stringify(done))))});
+    await pg.evaluate(() => App.reload());
+    await pg.waitForFunction(() => document.body.innerText.includes('اتحوّل'), null, {timeout: 8000}).catch(() => {});
+    eq('الآيفون بيعرض إن التحويل تم', (await pg.innerText('body')).includes('اتحوّل'), true);
+    await fetch(C + '?upto=999', {method: 'DELETE', headers: phone()});
+    ws2.close();
     // تحديث من الموبايل بيوصل لوحده
     await fetch(S, {method: 'PUT', headers: phone(), body: snap(L.key, 9999)});
     await pg.evaluate(() => App.reload());
     await pg.waitForFunction(() => document.body.innerText.includes('9,999'), null, {timeout: 8000}).catch(() => {});
     eq('الرقم الجديد وصل', (await pg.innerText('body')).includes('9,999'), true);
+    eq('مفيش رسالة «من الأندرويد بس» مع كل تحديث', await pg.evaluate(() => document.getElementById('toast').className.includes('show') && document.getElementById('toast').textContent.includes('الأندرويد بس')), false);
     // والإشعارات شغالة كمان: الصفحة بتجيب الجديد لوحدها من غير ما حد يدوس (كانت بتستنى الإشعار بس)
     await fetch(S, {method: 'PUT', headers: phone(), body: snap(L.key, 4321)});
     await pg.waitForFunction(() => document.body.innerText.includes('4,321'), null, {timeout: 25000}).catch(() => {});

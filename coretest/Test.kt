@@ -183,5 +183,34 @@ fun main() {
         check("et in [$snd]", i != null && i.wallet == Wallet.ETISALAT && i.type == TxType.IN && i.amount == 4500.0 && i.balance == 60157.29 && i.phone == "01063470062" && i.smsName == "Mohamed G Derar", i)
     }
 
+    // ---- the transfer by USSD code (Ussd.kt) ----
+    val to = "01012345678"
+    check("code default", Ussd.code(null, to, 500) == "*9*7*01012345678*500#", Ussd.code(null, to, 500))
+    check("code custom", Ussd.code("*9*7*{n}*{a}#", to, 75) == "*9*7*01012345678*75#")
+    check("code broken template", Ussd.code("*9*{a}#", to, 75) == null && Ussd.code("*9*7*{n}*{a}#;rm", to, 1) == null)
+    check("mobile +20", Ussd.mobile("+20 101 234 5678") == to, Ussd.mobile("+20 101 234 5678"))
+    check("mobile arabic", Ussd.mobile("٠١٠١٢٣٤٥٦٧٨") == to)
+    check("mobile bad", Ussd.mobile("0101234567") == null && Ussd.mobile("01312345678") == null && Ussd.mobile("") == null)
+    check("amount", Ussd.amount("1,500") == 1500L && Ussd.amount("١٢٠") == 120L)
+    check("amount bad", Ussd.amount("12.5") == null && Ussd.amount("0") == null && Ussd.amount("999999") == null && Ussd.amount("x") == null)
+    check("pin", Ussd.pinOk("123456") && !Ussd.pinOk("12a456") && !Ussd.pinOk("12") && !Ussd.pinOk(null))
+    fun st(text: String, input: Boolean, pin: Boolean = false, conf: Boolean = false) = Ussd.step(text, input, to, pin, conf)
+    check("ussd running", st("جارٍ تشغيل رمز USSD…", false) == Ussd.Step.WAIT)
+    check("ussd running en", st("USSD code running…", false) == Ussd.Step.WAIT)
+    check("ussd pin", st("من فضلك ادخل الرقم السري الخاص بمحفظتك لتحويل 500 جنيه الى 01012345678", true) == Ussd.Step.PIN)
+    check("ussd pin en", st("Please enter your PIN", true) == Ussd.Step.PIN)
+    check("ussd pin twice = stop", st("الرقم السري غير صحيح، ادخل الرقم السري مرة اخرى", true, pin = true) == Ussd.Step.STOP)
+    check("ussd confirm same number", st("سيتم تحويل 500 جنيه إلى ٠١٠١٢٣٤٥٦٧٨ بمصاريف 1 جنيه. للتأكيد اضغط 1", true, pin = true) == Ussd.Step.CONFIRM)
+    check("ussd confirm spaced number", st("تحويل 500 ج الى 010 1234 5678\n1- تأكيد\n2- إلغاء", true, pin = true) == Ussd.Step.CONFIRM)
+    check("ussd confirm other number = stop", st("سيتم تحويل 500 جنيه إلى 01099999999 للتأكيد اضغط 1", true, pin = true) == Ussd.Step.STOP)
+    check("ussd confirm twice = stop", st("للتأكيد اضغط 1 لتحويل الى 01012345678", true, pin = true, conf = true) == Ussd.Step.STOP)
+    check("ussd menu = stop", st("1- تحويل فلوس\n2- شحن رصيد\n3- دفع فواتير", true) == Ussd.Step.STOP)
+    check("ussd done", st("تم تحويل 500 جنيه لرقم 01012345678 بنجاح. رصيدك الحالي 8213.70", false, pin = true) == Ussd.Step.OK)
+    check("ussd wrong pin final", st("عفواً، الرقم السري غير صحيح", false, pin = true) == Ussd.Step.FAIL)
+    check("ussd no money", st("رصيدك غير كافٍ لإتمام العملية", false, pin = true) == Ussd.Step.FAIL)
+    check("ussd network", st("Connection problem or invalid MMI code.", false) == Ussd.Step.FAIL)
+    check("ussd limit", st("عفواً لقد تجاوزت الحد اليومي للتحويل", false, pin = true) == Ussd.Step.FAIL)
+    check("ussd unsure", st("طلبك وصل وهيتراجع", false, pin = true) == Ussd.Step.UNSURE)
+
     println(if (fails == 0) "ALL PASSED" else "$fails FAILED")
 }

@@ -40,7 +40,7 @@ object Freeze {
         if (sameBoot) {
             val gap = el - lastE
             val screenOn = try { (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive } catch (_: Exception) { true }
-            if (gap > LATE && !SmsApp.isDefault(ctx)) {   // as the SMS app there's no minute alarm: a long gap means nothing
+            if (gap > LATE && !SmsApp.isDefault(ctx) && !NoteListener.granted(ctx)) {   // with either fix there's no minute alarm: a long gap means nothing
                 s.putLong("frz_n", s.getLong("frz_n") + 1)
                 s.putLong("frz_at", now)
                 s.putLong("frz_gap", gap)

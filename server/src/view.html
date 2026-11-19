@@ -1,5 +1,5 @@
 <style>
-#vnote{position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;padding:0 12px calc(10px + env(safe-area-inset-bottom))}
+#vnote{position:fixed;left:0;right:0;bottom:0;z-index:9;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;padding:0 12px calc(10px + env(safe-area-inset-bottom))}
 #vnote>*{pointer-events:auto}
 #vnote .n{background:rgba(22,24,27,.86);color:#fff;font-size:13px;border-radius:999px;padding:7px 14px;line-height:1.5;text-align:center}
 #vnote.bad .n{background:#A33A1E}
@@ -38,6 +38,17 @@ body{padding-bottom:24px}
   function remember(k,p){ k64=k; proof=p; keyP=null; lset('wv_k',k); lset('wv_p',p); idb(function(s){ s.put(k,'key'); }); }
   function forget(){ k64=null; proof=null; keyP=null; ['wv_k','wv_p','wv_blob','wv_at'].forEach(ldel); idb(function(s){ s.delete('key'); }); }
   function key(){ return keyP || (keyP=crypto.subtle.importKey('raw', unb64(k64), {name:'AES-GCM'}, false, ['decrypt'])); }
+  /* a transfer request for the Android, locked with the same key (version 3, bound to its use like Sync.kt checks) */
+  var CMD_AAD=new TextEncoder().encode('flashon-cmd-v3');
+  function lockCmd(o){
+    return crypto.subtle.importKey('raw', unb64(k64), {name:'AES-GCM'}, false, ['encrypt']).then(function(k){
+      var iv=crypto.getRandomValues(new Uint8Array(12));
+      return crypto.subtle.encrypt({name:'AES-GCM', iv:iv, additionalData:CMD_AAD}, k, new TextEncoder().encode(JSON.stringify(o)))
+        .then(function(ct){ return cat(cat(new Uint8Array([3]), iv), new Uint8Array(ct)); });
+    });
+  }
+  function rid(){ var u=crypto.getRandomValues(new Uint8Array(12)), s=''; for (var i=0;i<u.length;i++) s+=('0'+u[i].toString(16)).slice(-2); return s; }
+  var live='';   // is the Android's line open right now ('1' / '0'), from the server
   function derive(pw){
     return crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits'])
       .then(function(k){ return crypto.subtle.deriveBits({name:'PBKDF2', hash:'SHA-256', salt:unb64(salt), iterations:ROUNDS}, k, 256); })
@@ -82,6 +93,7 @@ body{padding-bottom:24px}
           if (res.status===404) throw new Error('اللينك ده اتقفل أو اتغير من التطبيق');
           if (!res.ok) throw new Error('مفيش نت، جرب تاني');
           var nat=res.headers.get('X-At')||'';
+          if (res.headers.get('X-Live')!=null) live=res.headers.get('X-Live');
           return res.arrayBuffer().then(function(buf){
             remember(r.k, r.p);
             return open(buf).then(function(w){ at=nat; lset('wv_at',at); keep(buf); state=''; show(w); pushSetup(); });
@@ -123,6 +135,7 @@ body{padding-bottom:24px}
   function pull(){
     if (!id || !k64 || busy) return; busy=true;
     fetch('/api/s/'+id+(at&&last?'?since='+encodeURIComponent(at):''), {cache:'no-store', headers:{'X-Sub':proof}}).then(function(r){
+      if (r.headers.get('X-Live')!=null) live=r.headers.get('X-Live');
       if (r.status===204) { state=''; return null; }
       if (r.status===404) { state='gone'; ldel('wv_blob'); return null; }
       if (r.status===403) { forget(); last=''; stamp=0; pwScreen(); return null; }
@@ -181,7 +194,25 @@ body{padding-bottom:24px}
     getCached:function(){ return ''; },
     getData:function(){ return last; },
     refresh:function(){ pull(); },
-    getBody:function(x){ return bodies[x]||''; }
+    getBody:function(x){ return bodies[x]||''; },
+    viewing:function(){},   // every redraw says which conversation is open (an Android thing): nothing to do here, and no "Android only" toast
+    live:function(){ return live; },
+    /* a transfer from the iPhone: locked here, passed on by the server, run by the Android */
+    sendXfer:function(j){
+      var o; try{ o=JSON.parse(j); }catch(e){ return; }
+      if (!k64) { App.onXferSent(false, 'افتح اللينك بالباسورد الأول'); return; }
+      var cid=rid();
+      lockCmd({k:'xfer', id:cid, t:Date.now(), to:String(o.to), a:String(o.a), pin:String(o.pin), w:String(o.w||'')}).then(function(body){
+        return fetch('/api/s/'+id+'/cmd', {method:'POST', cache:'no-store', headers:{'X-Sub':proof,'Content-Type':'application/octet-stream'}, body:body});
+      }).then(function(r){
+        if (r.status===403) throw new Error('الباسورد اتغير، افتح اللينك تاني');
+        if (r.status===404) throw new Error('اللينك ده اتقفل من التطبيق');
+        if (r.status===429) throw new Error('جربت كتير، استنى شوية');
+        if (!r.ok) throw new Error('مقدرتش أبعته، جرب تاني');
+        return r.json();
+      }).then(function(res){ live=res.live?'1':'0'; App.onXferSent(true, '', cid); soon(); },
+        function(e){ App.onXferSent(false, (e && e.message && /[\u0600-\u06FF]/.test(e.message)) ? e.message : 'مفيش نت، جرب تاني'); });
+    }
   };
   window.WalletView = (typeof Proxy==='function') ? new Proxy(base,{get:function(t,p){ return p in t ? t[p] : function(){ toastMsg('التعديل من الموبايل الأندرويد بس'); }; }}) : base;
 

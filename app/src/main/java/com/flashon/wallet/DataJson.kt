@@ -26,8 +26,11 @@ object DataJson {
         o.put("notes", Freeze.notes(ctx))   // is the "محافظي شغال" line showing, and are the notification channels on
         val smsApp = SmsApp.json(ctx, store)
         o.put("smsApp", smsApp)   // is محافظي the phone's SMS app (then a frozen app still gets every SMS first)
-        // did the phone freeze the app while closed (Infinix "Stop app when idle"); doesn't matter once it's the SMS app
-        o.put("hold", Freeze.json(store).apply { if (smsApp.optBoolean("on")) put("held", false) })
+        val listen = NoteListener.json(ctx, store)
+        o.put("listen", listen)   // notification access: the phone's SMS app stays, and محافظي hears each new SMS from its notification
+        // did the phone freeze the app while closed (Infinix "Stop app when idle"); the minute alarm that tells is off with either fix
+        o.put("hold", Freeze.json(store).apply { if (smsApp.optBoolean("on") || listen.optBoolean("on")) put("held", false) })
+        o.put("xfer", try { Xfer.json(ctx, store, led) } catch (_: Exception) { JSONObject() })   // Vodafone Cash transfers by code, here and from the iPhone
         o.put("notifOk", ctx.getSystemService(android.app.NotificationManager::class.java).areNotificationsEnabled())
         o.put("settings", JSONObject()
             .put("monthReceive", lim.monthReceive).put("monthSend", lim.monthSend)

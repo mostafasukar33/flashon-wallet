@@ -146,7 +146,7 @@ var VIEW = !!(B && B.viewOnly);
 if (VIEW) document.documentElement.classList.add('view');
 if (!B) {
   var mock = {
-    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:true, notifOk:true, watch:true, notes:{line:false,watch:3,tx:0,limits:4},hold:{n:3,at:Date.now()-120000,gap:33928000,best:0,proven:1200000,held:true,missAt:Date.now()-120000,missLag:511000,tr:true}, smsApp:{on:false,can:true,at:0,unread:0}, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
+    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:true, notifOk:true, watch:true, notes:{line:false,watch:3,tx:0,limits:4},hold:{n:3,at:Date.now()-120000,gap:33928000,best:0,proven:1200000,held:true,missAt:Date.now()-120000,missLag:511000,tr:true}, smsApp:{on:false,can:true,at:0,unread:0}, listen:{on:false,live:false,at:0}, xfer:{perm:false,phone:false,acc:false,ready:false,remote:false,code:'*9*7*{n}*{a}#',def:'*9*7*{n}*{a}#',busy:false,line:'off',accounts:[{w:'vfs3',label:'فودافون كاش',own:'01005174644',can:8713.7,bal:8713.7}],list:[{id:'a1',to:'01011112222',a:500,from:'iphone',w:'vfs3',st:'ok',msg:'تم تحويل 500 جنيه لرقم 01011112222 بنجاح. رصيدك الحالي 8213.70',at:Date.now()-3600000,up:Date.now()-3500000}]}, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
     settings:{monthReceive:200000,monthSend:200000,daySend:60000,dayReceiveOn:false,dayReceive:60000,feesCount:true},
     update:{available:true,version:'2'},
     months:['2026-10'],
@@ -185,6 +185,13 @@ if (!B) {
     askSmsApp:function(){mock.smsApp={on:true,can:true,at:Date.now(),unread:2};mock.hold.held=false;setTimeout(function(){App.reload();App.onSmsApp(true)},300)},
     openAppInfo:function(){toast('بيفتح معلومات التطبيق…')},
     openDefaultApps:function(){toast('بيفتح التطبيقات الافتراضية…')},
+    openNoteAccess:function(){mock.listen={on:true,live:true,at:Date.now()};mock.hold.held=false;setTimeout(App.reload,300)},
+    askCallPerm:function(){mock.xfer.perm=mock.xfer.phone=true;mock.xfer.ready=mock.xfer.acc;setTimeout(App.reload,200)},
+    openAccessibility:function(){mock.xfer.acc=true;mock.xfer.ready=mock.xfer.perm;setTimeout(App.reload,300)},
+    setXferRemote:function(on){mock.xfer.remote=on;mock.xfer.line=on?'on':'off';setTimeout(App.reload,100)},
+    setXferCode:function(c){mock.xfer.code=c||mock.xfer.def;setTimeout(App.reload,100);return true},
+    sendXfer:function(j){var o=JSON.parse(j);setTimeout(function(){mock.xfer.list.unshift({id:'m'+Date.now(),to:o.to,a:+o.a,from:'phone',w:o.w,st:'run',msg:'',at:Date.now(),up:Date.now()});App.onXferSent(true,'');App.reload()},300)},
+    dialXfer:function(){toast('بيفتح الاتصال بالكود…')},
     viewing:function(){},
     loadThreads:function(){setTimeout(function(){App.onThreads(JSON.stringify({unread:2,threads:[
       {id:'1',addr:'VF-Cash',name:null,snippet:'تم استلام مبلغ 7000 جنيه من رقم 01018064481 المسجل بإسم Mahmoud A Hemdan',time:Date.now()-60000,out:false,unread:1},
@@ -333,9 +340,12 @@ function home(){
       '<div><span>فاضل تحويل الشهر ده</span><b class="num" style="text-align:right">'+fmt(leftM)+'</b></div></div>'+
       (locked>0.5?'<div class="lock">'+fmt(locked)+' ج هيتقفلوا للشهر الجاي</div>':'')+'</div>';
   }
+  if (xferShow()) h+='<button class="btn main" data-act="xfer" style="display:flex;align-items:center;justify-content:center;gap:8px">'+ICON.outA.replace('#A33A1E','#fff')+'<span>حوّل فودافون كاش'+(VIEW?' من الأندرويد':'')+'</span></button>';
   if (!VIEW && held()) h+='<div class="alert bad" style="gap:8px"><b>⚠️ الموبايل جمّد التطبيق '+dur(D.hold.gap)+' وهو مقفول</b>'+
-    '<span style="line-height:1.7">علشان كده التحويل اتأخر ومراحش الآيفون غير لما فتحت التطبيق.'+(smsCan()?' وفيه حل قطعي ليها.':'')+'</span>'+
-    '<button class="btn main" data-act="fixhold">'+(smsCan()?'الحل القطعي':'التفاصيل والإعدادات')+'</button></div>';
+    '<span style="line-height:1.7">علشان كده التحويل اتأخر ومراحش الآيفون غير لما فتحت التطبيق. وفيه حل ليها من غير ما تغيّر تطبيق الرسايل.</span>'+
+    '<button class="btn main" data-act="fixhold">الحل</button></div>';
+  if (!VIEW && smsOn() && listenOn()) h+='<div class="minibat"><span>«محافظي» بيسمع إشعارات الرسايل، فتقدر ترجّع تطبيق الرسايل بتاع الموبايل</span><button data-act="defapps">رجّعه</button></div>';
+  else if (!VIEW && lateAfterListen()) h+='<div class="minibat"><span>آخر تحويل وصل متأخر '+dur(D.hold.missLag)+' حتى مع «الوصول للإشعارات»</span><button data-act="fixhold">التفاصيل</button></div>';
   if (!VIEW && notesOff()) h+='<div class="minibat"><span>إشعارات التطبيق مقفولة أو مستخبية، فمفيش إشعار بالتحويلات هنا</span><button data-act="notif">شغّلها</button></div>';
   else if (!VIEW && !D.batteryOk) h+='<div class="minibat"><span>اسمح للتطبيق يشتغل في الخلفية عشان ميفوتش رسايل</span><button data-act="battery">اسمحله</button></div>';
 
@@ -360,6 +370,7 @@ function home(){
     D.now.forEach(function(n){ if(n.hasData && (S.filter==='all'||S.filter===n.w)) h+=limitCard(n); });
   }
 
+  h+=xferRecent();
   h+='<div class="sect">العمليات</div>';
   h+='<label class="search">'+ICON.search+'<input id="q" placeholder="دوّر باسم أو رقم أو مبلغ" aria-label="بحث" inputmode="search"></label>';
   h+='<div class="chips">'+[['all','الكل']].concat(D.now.map(function(n){return [n.w, wname(n.w)]})).map(function(c){return '<button class="chip'+(S.filter===c[0]?' on':'')+'" data-act="filter" data-f="'+c[0]+'">'+c[1]+'</button>'}).join('')+'</div>';
@@ -482,7 +493,7 @@ function settingsScreen(){
     '<button class="btn main" data-act="save">احفظ</button></div>';
 
   var sy=D.sync||{on:false};
-  h+='<div class="card col" style="gap:10px"><h2>شوفه من موبايل تاني</h2>';
+  h+='<div class="card col" style="gap:10px" id="syncCard"><h2>شوفه من موبايل تاني</h2>';
   if (!sy.on) {
     h+='<span class="small mute" style="line-height:1.7">افتح الحساب من الآيفون أو أي موبايل تاني، للاطلاع بس، ويجيلك إشعار هناك أول ما أي فلوس تدخل أو تخرج. الحساب بيتقفل بالباسورد قبل ما يطلع من هنا، ومن غير الباسورد محدش يقدر يفتحه، حتى لو معاه اللينك.</span>'+
       pwField()+'<button class="btn main" data-act="syncon">اعمل لينك</button>';
@@ -513,7 +524,9 @@ function settingsScreen(){
     '<div class="grid2"><select id="ex_m" class="pill" style="min-height:48px;border-radius:10px">'+mo+'</select><select id="ex_w" class="pill" style="min-height:48px;border-radius:10px">'+wo+'</select></div>'+
     '<button class="btn ghost" data-act="export">اعمل الملف وابعته</button><span class="xs mute" style="line-height:1.6">ملف بيتفتح على Excel، تقدر تبعته واتساب أو إيميل أو تحفظه على Drive.</span></div>';
 
-  if (smsOn()||smsCan()) h+='<div class="card col" style="gap:10px"><h2>تطبيق الرسايل</h2>'+(smsOn()?smsOnBox(true):smsAppBox())+'</div>';
+  h+='<div class="card col" style="gap:10px"><h2>التحويلات توصل في نفس اللحظة</h2>'+listenBox(true)+'</div>';
+  if (smsOn()) h+='<div class="card col" style="gap:10px"><h2>تطبيق الرسايل</h2>'+smsOnBox(true)+'</div>';
+  if (xferCan()) h+=xferSettings();
   h+='<div class="card col" style="gap:10px"><h2>التشغيل في الخلفية</h2>'+bgState()+'</div>';
   h+='<div class="card col" style="gap:10px"><h2>الرسايل</h2><span class="small mute" style="line-height:1.7">لو حاسس إن فيه عملية ناقصة، خلي التطبيق يقرا كل الرسايل من الأول.</span><button class="btn ghost" data-act="rescan">اقرا الرسايل من جديد</button></div>';
   h+='<div class="card col" style="gap:10px"><h2>التطبيق</h2><span class="small mute">النسخة '+esc(D.version)+'</span><button class="btn ghost" data-act="chkupd">شوف فيه تحديث</button></div>';
@@ -532,13 +545,14 @@ function dur(ms){
 }
 function bgState(){
   var H=D.hold||{};
+  if (listenOn() && !smsOn()) return '<span class="small mute" style="line-height:1.7">«محافظي» بيسمع إشعارات الرسايل، فأي رسالة بتوصله في نفس اللحظة اللي تطبيق الرسايل بيعرضها فيها، ومن غير المنبّه ⏰ اللي كان كل دقيقة. السطر «💰 محافظي شغال» لسه موجود احتياطي.</span>';
   if (smsOn()) return '<span class="small mute" style="line-height:1.7">«محافظي» هو تطبيق الرسايل، فأي رسالة بتوصله الأول حتى لو الموبايل جمّده، ومن غير المنبّه ⏰ اللي كان كل دقيقة. السطر «💰 محافظي شغال» لسه موجود احتياطي.</span>';
   if (held()) {
     return '<div class="alert bad"><b>⚠️ الموبايل جمّد التطبيق '+dur(H.gap)+' وهو مقفول</b>'+
       '<span style="line-height:1.7">آخر مرة '+dayF.format(new Date(H.at))+' الساعة '+timeF.format(new Date(H.at))+(H.n>1?'، واتكررت '+times(H.n):'')+'.'+
       (H.missLag?' وآخر تحويل وصل التطبيق بعد '+dur(H.missLag)+' من وصول الرسالة.':'')+
-      ' وهو متجمّد مفيش أي حاجة في التطبيق بتشتغل، ولا حتى استقبال الرسايل، لحد ما تفتحه.'+(smsCan()?' الحل القطعي في «تطبيق الرسايل» اللي فوق.':'')+'</span></div>'+
-      (smsCan()?'<details class="old"><summary>أو الإعدادات (مش مضمونة على الموبايل ده)</summary>'+oldSteps()+'</details>':oldSteps());
+      ' وهو متجمّد مفيش أي حاجة في التطبيق بتشتغل، ولا حتى استقبال الرسايل، لحد ما تفتحه. الحل في «التحويلات توصل في نفس اللحظة» اللي فوق.</span></div>'+
+      '<details class="old"><summary>أو الإعدادات (مش مضمونة على الموبايل ده)</summary>'+oldSteps()+'</details>';
   }
   if (H.at) {
     return '<div class="alert good"><b>✓ اتصلحت</b><span style="line-height:1.7">التطبيق فضل صاحي '+dur(H.best)+' والشاشة مقفولة من غير ما الموبايل يجمّده، فالتحويل بيوصل الآيفون في نفس اللحظة.</span></div>'+
@@ -556,8 +570,8 @@ function smsOnBox(more){
 function smsAppBox(){
   var H=D.hold||{};
   return '<div class="col" style="gap:8px;line-height:1.7">'+
-    '<b style="font-size:16px">الحل القطعي: خلّي «محافظي» تطبيق الرسايل</b>'+
-    '<span class="small">الموبايل ده بيجمّد أي تطبيق مقفول مهما عملنا: جرّبنا الخدمة الشغالة على طول، ومن غير توفير بطارية، والمنبّه كل دقيقة'+(H.gap>3600000?'، وبرضو فضل متجمّد '+dur(H.gap):'')+'. الحاجة الوحيدة اللي مبيقدرش يجمّدها هي تطبيق الرسايل، لأن أندرويد لازم يديله كل رسالة أول ما توصل علشان يحفظها، وإلا الرسايل تضيع.</span>'+
+    '<b style="font-size:16px">آخر حل: خلّي «محافظي» تطبيق الرسايل</b>'+
+    '<span class="small">لو حتى مع «الوصول للإشعارات» التحويل لسه بيتأخر: أندرويد مبيقدرش يجمّد تطبيق الرسايل خالص، لأنه لازم يديله كل رسالة أول ما توصل علشان يحفظها. بس ساعتها تطبيق الرسايل بتاع الموبايل بيقف، ورسايلك كلها بتبقى في «محافظي».</span>'+
     '<span class="small">فلما «محافظي» يبقى تطبيق الرسايل، أي تحويل بيروح الآيفون في نفس اللحظة حتى لو الموبايل مقفول بقاله ساعات.</span>'+
     '<button class="btn main" data-act="smsapp">خليه تطبيق الرسايل</button>'+
     '<span class="xs mute" style="line-height:1.6">هيظهرلك سؤال من أندرويد: اختار «محافظي» ودوس «تعيين كافتراضي» '+en('Set as default')+'.</span>'+
@@ -570,9 +584,135 @@ function smsAppBox(){
       '<button class="btn ghost" data-act="appinfo">افتح معلومات التطبيق</button><button class="btn ghost" data-act="defapps">أو اختاره بنفسك من التطبيقات الافتراضية</button></div>':'')+
     '</div>';
 }
+/* ---------- notification access: the fix that keeps the phone's SMS app ---------- */
+function listenOn(){ return !VIEW && !!(D && D.listen && D.listen.on); }
+/* a wallet SMS that still came late after notification access was turned on */
+function lateAfterListen(){ var H=D.hold||{}; return listenOn() && H.missAt>0 && D.listen.at>0 && H.missAt>D.listen.at+60000; }
+function restrictedHint(what, tried){
+  if (!tried) return '';
+  return '<div class="alert mid"><b>لو ظهر «إعداد مقيّد» '+en('Restricted setting')+'</b><span style="line-height:1.7">أندرويد بيقفل '+what+' للتطبيقات اللي متسطبة من برا المتجر. افتح «معلومات التطبيق»، دوس على النقط التلاتة ⋮ فوق، واختار «السماح بالإعدادات المقيدة» '+en('Allow restricted settings')+'، وارجع شغّله تاني.</span>'+
+    '<button class="btn ghost" data-act="appinfo">افتح معلومات التطبيق</button></div>';
+}
+function listenBox(more){
+  var L=D.listen||{};
+  if (L.on) {
+    return '<div class="alert good"><b>✓ «محافظي» بيسمع إشعارات الرسايل</b><span style="line-height:1.7">تطبيق الرسايل بتاع الموبايل شغال زي ما هو، وأول ما رسالة توصل وإشعارها يظهر، «محافظي» بيعرف في نفس اللحظة ويبعت التحويل للآيفون.'+(L.live?'':' (أندرويد لسه بيوصّله، افتح التطبيق تاني بعد ثواني.)')+'</span></div>'+
+      (smsOn()?'<button class="btn main" data-act="defapps">رجّع تطبيق الرسايل بتاع الموبايل</button><span class="xs mute" style="line-height:1.6">مبقاش لازم «محافظي» يكون تطبيق الرسايل. هتفتح «التطبيقات الافتراضية»: اختار «تطبيق الرسايل» وبعدين تطبيق الموبايل، وكل الرسايل هتلاقيها فيه.</span>':'')+
+      (lateAfterListen()?'<div class="alert mid"><b>⚠️ بس آخر تحويل وصل متأخر '+dur(D.hold.missLag)+'</b><span style="line-height:1.7">يعني الموبايل لسه بيمسك «محافظي» ساعات. اتأكد إن إشعارات تطبيق الرسايل نفسه شغالة ومش صامتة، ولو اتكررت جرّب الإعدادات اللي تحت'+(smsCan()?'، أو آخر حل:':'.')+'</span></div>'+
+        (smsCan()?'<details class="old"><summary>آخر حل: «محافظي» يبقى تطبيق الرسايل</summary>'+smsAppBox()+'</details>':''):'')+
+      (more?'<span class="xs mute" style="line-height:1.6">لو اتقفل في أي وقت من إعدادات الموبايل هيظهرلك هنا.</span>':'');
+  }
+  return '<div class="col" style="gap:8px;line-height:1.7">'+
+    '<b style="font-size:16px">شغّل «الوصول للإشعارات» لـ«محافظي»</b>'+
+    '<span class="small">الموبايل ده بيجمّد التطبيقات المقفولة، فالرسالة مبتوصلش «محافظي» غير لما تفتحه. بس أندرويد نفسه بيفضل موصّل «الوصول للإشعارات» على طول (هو ده اللي الساعات الذكية شغالة بيه)، فأول ما تطبيق الرسايل يعرض إشعار الرسالة، «محافظي» بيعرف في نفس اللحظة ويبعت التحويل للآيفون.</span>'+
+    '<span class="small">وتطبيق الرسايل بتاع الموبايل بيفضل شغال عادي، ومفيش منبّه ⏰ كل دقيقة.</span>'+
+    '<button class="btn main" data-act="noteacc">شغّله</button>'+
+    '<span class="xs mute" style="line-height:1.6">هتفتح صفحة «الوصول للإشعارات» '+en('Notification access')+': شغّل المفتاح اللي جنب «محافظي» ودوس «سماح».</span>'+
+    restrictedHint('«الوصول للإشعارات»', S.noteTried)+
+    (smsOn()?'':(smsCan()&&more?'<details class="old"><summary>آخر حل: «محافظي» يبقى تطبيق الرسايل</summary>'+smsAppBox()+'</details>':''))+
+    '</div>';
+}
+
+/* ---------- Vodafone Cash transfers by code (here, or from the iPhone through the Android) ---------- */
+function X(){ return (D && D.xfer) || {accounts:[],list:[]}; }
+function xferCan(){ return !!(X().accounts && X().accounts.length); }
+function xferShow(){ return xferCan() && (!VIEW || !!X().remote); }
+var XST={run:['⏳','بيحوّل…','var(--blue)'],ok:['✓','اتحوّل','var(--in)'],fail:['✗','ماتمش','var(--out)'],stop:['✋','وقف','var(--out)'],unsure:['؟','شوف ردّ فودافون','var(--day)'],sent:['📨','اتبعت للأندرويد…','var(--blue)']};
+function xferRows(list){
+  return list.map(function(x){
+    var st=XST[x.st]||XST.fail;
+    return '<div class="tx" style="align-items:flex-start"><div class="dot" style="background:#ECEDE9;color:'+st[2]+';font-weight:700">'+st[0]+'</div>'+
+      '<div class="mid"><span class="who"><span class="num">'+fmt(x.a)+'</span> ج لـ <span class="num">'+esc(x.to)+'</span></span>'+
+      '<span class="xs" style="color:'+st[2]+';font-weight:600">'+st[1]+(x.from==='iphone'?' · من الآيفون':'')+' · '+whenF(x.up||x.at)+'</span>'+
+      (x.msg?'<span class="xs mute" style="line-height:1.6;white-space:normal">'+esc(x.msg)+'</span>':'')+'</div></div>';
+  }).join('');
+}
+function xferRecent(){
+  if (!xferCan()) return '';
+  var now=Date.now(), list=(X().list||[]).filter(function(x){return now-(x.up||x.at)<3*86400000}).slice(0,4);
+  if (S.xfSent && !(X().list||[]).some(function(x){return x.id===S.xfSent.id})) { if (now-S.xfSent.at<11*60000) list.unshift(S.xfSent); else S.xfSent=null; }
+  if (!list.length) return '';
+  return '<div class="sect">التحويلات من التطبيق</div><div class="col" style="gap:8px">'+xferRows(list)+'</div>';
+}
+function xferSteps(){
+  var x=X();
+  return '<div class="col" style="gap:8px;line-height:1.7">'+
+    (x.perm&&x.phone?'<span class="small">1. إذن المكالمات ✓</span>':'<b>1. اسمح لـ«محافظي» يطلب الكود</b><button class="btn ghost" data-act="callperm">اسمح</button><span class="xs mute">دوس «سماح» لـ«إجراء المكالمات الهاتفية وإدارتها». ده علشان يطلب الكود على خط فودافون كاش بس.</span>')+
+    (x.acc?'<span class="small">2. «التحويل التلقائي» شغال ✓</span>':'<b>2. شغّل «التحويل التلقائي»</b><button class="btn ghost" data-act="accset">افتح إمكانية الوصول</button>'+
+      '<span class="xs mute" style="line-height:1.6">في «إمكانية الوصول» '+en('Accessibility')+' ← «التطبيقات المثبتة» '+en('Installed apps')+' اختار «محافظي: التحويل التلقائي» وشغّله. هو اللي بيكتب الرقم السري في شاشة فودافون ويقرا الرد، وبيبص على الشاشة وقت التحويل بس.</span>'+
+      restrictedHint('«إمكانية الوصول»', S.accTried))+
+    '</div>';
+}
+function xferSettings(){
+  var x=X(), sy=D.sync||{};
+  var h='<div class="card col" style="gap:10px"><h2>التحويل من التطبيق ومن الآيفون</h2>'+
+    '<span class="small mute" style="line-height:1.7">«محافظي» بيطلب كود التحويل <bdi dir="ltr" class="num">'+esc(x.code).replace('{n}','الرقم').replace('{a}','المبلغ')+'</bdi> على خط فودافون كاش، ويكتب الرقم السري في شاشة فودافون بنفسه، ويقولك فودافون ردت بإيه. تحوّل من هنا أو من الآيفون.</span>'+xferSteps();
+  if (!sy.on) h+='<span class="small" style="line-height:1.7">3. علشان تحوّل من الآيفون: اعمل لينك في «شوفه من موبايل تاني» الأول.</span>';
+  else {
+    h+='<label class="switch"><span style="font-size:15px">3. اسمح بالتحويل من الآيفون</span><input type="checkbox" id="s_xrm"'+(x.remote?' checked':'')+'></label>'+
+      '<span class="xs mute" style="line-height:1.6">الطلب بيتقفل على الآيفون بنفس باسورد اللينك قبل ما يطلع، والسيرفر ميقدرش يقراه ولا يعمل طلب من عنده. يعني اللي يقدر يحوّل هو اللي معاه اللينك والباسورد والرقم السري بتاع المحفظة. الطلب اللي يتأخر أكتر من 10 دقايق مبيتنفذش.</span>';
+    if (x.remote) h+=(x.line==='on'?'<span class="xs" style="color:var(--in);font-weight:600">✓ متصل بالآيفون ومستني</span>':'<span class="xs mute">بيتصل بالآيفون… (محتاج نت)</span>')+
+      '<span class="xs mute" style="line-height:1.6">على الأندرويد اللي في البيت: سيبه على الشاحن والنت. ولو عليه قفل شاشة بباسورد أو بصمة، شاشة فودافون ممكن متظهرش وهو مقفول، فجرّب تحويل صغير الأول وهو مقفول.</span>';
+  }
+  h+='<button class="btn ghost" data-act="xfer">جرّب تحويل</button>'+
+    '<details class="old"><summary>كود التحويل</summary><div class="col" style="gap:8px;margin-top:8px"><span class="xs mute" style="line-height:1.6">{n} مكان الرقم و{a} مكان المبلغ. غيّره بس لو فودافون غيّرت الكود.</span>'+
+    '<input type="text" id="s_xcode" dir="ltr" class="num" style="border:1px solid var(--line2);border-radius:10px;min-height:48px;padding:0 12px;font-size:17px;background:#fff" value="'+esc(x.code)+'">'+
+    '<div class="grid2"><button class="btn ghost" data-act="xcode">احفظ</button><button class="btn ghost" data-act="xcodedef">رجّع العادي</button></div></div></details>';
+  return h+'</div>';
+}
+function xferAcc(){
+  var a=X().accounts||[]; if (!a.length) return null;
+  var pick=a.filter(function(n){return n.w===(S.xf&&S.xf.w)})[0];
+  if (!pick) pick=a.reduce(function(b,n){return (n.can||0)>(b.can||0)?n:b});
+  return pick;
+}
+function digits(v){ return String(v||'').replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)}); }
+function xMobile(v){ var d=digits(v).replace(/[^0-9]/g,''); if(d.indexOf('0020')===0) d='0'+d.slice(4); else if(d.indexOf('20')===0&&d.length===12) d='0'+d.slice(2); else if(d.length===10&&d.charAt(0)==='1') d='0'+d; return /^01[0125][0-9]{8}$/.test(d)?d:null; }
+function xferSheet(){
+  var x=X(), acc=xferAcc(), f=S.xf||{};
+  if (!acc) return;
+  var accs=x.accounts||[];
+  var h='<h2>تحويل فودافون كاش</h2>';
+  if (VIEW) {
+    var live=B.live?B.live():'';
+    h+=(live==='1'?'<span class="xs" style="color:var(--in);font-weight:600">✓ الأندرويد متصل دلوقتي</span>':
+      live==='0'?'<span class="xs" style="color:var(--day);font-weight:600;line-height:1.6">⚠️ الأندرويد مش متصل دلوقتي (مفيش نت عليه؟). الطلب هيستنى 10 دقايق، ولو مااتصلش مش هيتنفذ.</span>':'');
+    if (!x.ready) h+='<div class="alert mid"><b>الأندرويد لسه محتاج إعداد</b><span style="line-height:1.7">على الأندرويد: الإعدادات ← «التحويل من التطبيق ومن الآيفون»، واسمح بالمكالمات وشغّل «التحويل التلقائي».</span></div>';
+  } else if (!x.ready) h+='<div class="alert mid"><b>قبل أول تحويل</b>'+xferSteps()+'</div>';
+  if (S.xfAsk) {
+    h+='<div class="card col" style="gap:6px;font-size:16px;line-height:1.8"><span>هيتحوّل <b class="num">'+fmt(+f.a)+'</b> ج</span><span>لـ <b class="num">'+esc(f.to)+'</b></span><span class="small mute">من '+esc(acc.label)+(acc.own?' <span class="num">'+esc(acc.own)+'</span>':'')+'. الرسوم بتتخصم من المحفظة زي العادي.</span></div>'+
+      '<div class="grid2"><button class="btn main" data-act="xgo" id="xgo">أيوه حوّل</button><button class="btn ghost" data-act="xback">رجوع</button></div>';
+    openSheet(h); return;
+  }
+  if (accs.length>1) h+='<div class="field"><label for="xf_w">من</label><select id="xf_w" class="pill" style="width:100%;text-align:right;min-height:48px;border-radius:10px">'+
+    accs.map(function(n){return '<option value="'+esc(n.w)+'"'+(n.w===acc.w?' selected':'')+'>'+esc(n.label)+(n.own?' · '+esc(n.own):'')+'</option>'}).join('')+'</select></div>';
+  h+='<div class="field"><label for="xf_to">الرقم</label><input type="tel" id="xf_to" class="num" dir="ltr" style="text-align:left" placeholder="01xxxxxxxxx" autocomplete="off" value="'+esc(f.to||'')+'"></div>'+
+    '<div class="field"><label for="xf_a">المبلغ (جنيه)</label><input type="number" id="xf_a" class="num" inputmode="numeric" style="text-align:right" value="'+esc(f.a||'')+'"></div>'+
+    (acc.can!=null?'<span class="xs mute">تقدر تحوّل دلوقتي <span class="num">'+fmt(acc.can)+'</span> ج من '+esc(acc.label)+'</span>':'')+
+    '<div class="field"><label for="xf_pin">الرقم السري بتاع فودافون كاش</label><input type="password" id="xf_pin" inputmode="numeric" autocomplete="off" dir="ltr" style="text-align:left;border:1px solid var(--line2);border-radius:10px;min-height:48px;padding:0 12px;font-size:17px;background:#fff" value="'+esc(f.pin||'')+'"></div>'+
+    '<span class="xs mute" style="line-height:1.6">الرقم السري بيتكتب في شاشة فودافون على الأندرويد مرة واحدة ومبيتحفظش في أي حتة'+(VIEW?'، وبيتقفل بباسورد اللينك قبل ما يطلع من الآيفون':'')+'.</span>'+
+    '<button class="btn main" data-act="xnext">كمّل</button>'+
+    (!VIEW&&!x.ready?'<button class="btn ghost" data-act="xdial">أو اطلب الكود واكتب الرقم السري بنفسك</button>':'');
+  openSheet(h);
+}
+function xferRead(){
+  var g=function(id){var e=document.getElementById(id); return e?e.value.trim():'';};
+  var acc=xferAcc(), w=g('xf_w')||(acc&&acc.w);
+  S.xf={w:w, to:g('xf_to'), a:g('xf_a'), pin:digits(g('xf_pin'))};
+  return S.xf;
+}
+function xferCheck(f){
+  var to=xMobile(f.to), a=digits(f.a).replace(/,/g,'');
+  if (!to) return 'اكتب رقم موبايل مصري صح';
+  if (!/^[0-9]+$/.test(a) || +a<1 || +a>60000) return 'المبلغ جنيهات صحيحة من 1 لـ 60,000';
+  if (!/^[0-9]{4,8}$/.test(f.pin)) return 'الرقم السري أرقام بس';
+  f.to=to; f.a=String(+a); return '';
+}
+
 function holdSteps(){
-  if (smsOn()) return smsOnBox(false);
-  return (smsCan()?smsAppBox()+'<details class="old"><summary>أو الإعدادات (مش مضمونة على الموبايل ده)</summary>'+oldSteps()+'</details>':oldSteps());
+  if (smsOn() && !listenOn()) return smsOnBox(false);
+  return listenBox(false)+
+    (!listenOn()||lateAfterListen()?'<details class="old"'+(lateAfterListen()?' open':'')+'><summary>أو الإعدادات (مش مضمونة على الموبايل ده)</summary>'+oldSteps()+'</details>':'');
 }
 function oldSteps(){
   var H=D.hold||{}, tr=!!H.tr;
@@ -765,8 +905,27 @@ document.addEventListener('click', function(e){
     case 'autostart': if (B.openAutostart) B.openAutostart(); break;
     case 'appbat': if (B.openAppBattery) B.openAppBattery(); else B.openBattery(); break;
     case 'powersave': if (B.openPowerSaving) B.openPowerSaving(); break;
-    case 'fixhold': openSheet((smsCan()?'':'<h2>'+(smsOn()?'تطبيق الرسايل':'علشان الموبايل ميجمّدش التطبيق')+'</h2>')+holdSteps()); break;
+    case 'fixhold': openSheet('<h2>علشان التحويل يوصل في نفس اللحظة</h2>'+holdSteps()); break;
     case 'smsapp': if (B.askSmsApp) B.askSmsApp(); break;
+    case 'noteacc': S.noteTried=true; if (B.openNoteAccess) B.openNoteAccess(); break;
+    case 'callperm': if (B.askCallPerm) B.askCallPerm(); break;
+    case 'accset': S.accTried=true; if (B.openAccessibility) B.openAccessibility(); break;
+    case 'xfer': S.xfAsk=false; S.xf=S.xf&&S.xf.w?{w:S.xf.w}:null; xferSheet(); break;
+    case 'xnext':
+      var xf=xferRead(), bad=xferCheck(xf);
+      if (bad) { toast(bad); break; }
+      S.xfAsk=true; xferSheet(); break;
+    case 'xback': S.xfAsk=false; xferSheet(); break;
+    case 'xgo':
+      if (!S.xf) break;
+      var gb=document.getElementById('xgo'); if (gb) { gb.disabled=true; gb.textContent=VIEW?'بيبعت…':'بيطلب الكود…'; }
+      B.sendXfer(JSON.stringify({w:S.xf.w,to:S.xf.to,a:S.xf.a,pin:S.xf.pin}));
+      S.xf.pin=''; break;
+    case 'xdial': var dx=xferRead(); if (!xMobile(dx.to)) { toast('اكتب رقم موبايل مصري صح'); break; } if (B.dialXfer) B.dialXfer(xMobile(dx.to), digits(dx.a)); break;
+    case 'xcode':
+      var xc=document.getElementById('s_xcode'); if (!xc) break;
+      if (B.setXferCode && B.setXferCode(xc.value.trim())===false) toast('الكود لازم يكون فيه {n} و{a} وأرقام و* و# بس'); else toast('اتحفظ'); break;
+    case 'xcodedef': if (B.setXferCode) B.setXferCode(''); toast('رجع الكود العادي'); break;
     case 'appinfo': if (B.openAppInfo) B.openAppInfo(); break;
     case 'defapps': if (B.openDefaultApps) B.openDefaultApps(); break;
     case 'sms': closeSheet(); SMS.threads=null; go('sms'); B.loadThreads(); break;
@@ -841,7 +1000,7 @@ function watchCards(){
     obs.observe(w);
   }
 }
-document.addEventListener('change', function(e){ if(e.target.id==='month'){ S.month=e.target.value; render(); } if(e.target.id==='s_txn'){ B.setTxNotify(e.target.checked); toast(e.target.checked?'هيجيلك إشعار مع كل عملية':'الإشعارات دي اتقفلت'); } });
+document.addEventListener('change', function(e){ if(e.target.id==='month'){ S.month=e.target.value; render(); } if(e.target.id==='s_xrm'){ if (B.setXferRemote) B.setXferRemote(e.target.checked); toast(e.target.checked?'التحويل من الآيفون اشتغل':'التحويل من الآيفون اتقفل'); } if(e.target.id==='s_txn'){ B.setTxNotify(e.target.checked); toast(e.target.checked?'هيجيلك إشعار مع كل عملية':'الإشعارات دي اتقفلت'); } });
 var qT;
 document.addEventListener('input', function(e){
   if(e.target.id==='smsText'){ S.draft=e.target.value; grow(e.target); return; }
@@ -897,6 +1056,14 @@ window.App = {
     if (S.chatId && c.id && S.chatId!==c.id && S.chatAddr!==c.addr) return;   // an older answer for another conversation
     SMS.chat=c; S.chatId=c.id; if (c.addr) S.chatAddr=c.addr; if (D && D.smsApp) D.smsApp.unread=c.unread;
     drawChat();
+  },
+  onXferSent: function(ok, msg, id){
+    var gb=document.getElementById('xgo'); if (gb) { gb.disabled=false; gb.textContent='أيوه حوّل'; }
+    if (!ok) { toast(msg||'مقدرتش أبعته'); return; }
+    if (VIEW && id && S.xf) S.xfSent={id:id, to:S.xf.to, a:+S.xf.a, st:'sent', from:'iphone', at:Date.now(), msg:''};
+    S.xf={w:S.xf&&S.xf.w}; S.xfAsk=false; closeSheet();
+    toast(VIEW?'اتبعت للأندرويد ✓':'بيطلب الكود…');
+    if (S.screen==='home') { var y=window.scrollY; render(); window.scrollTo(0,y); }
   },
   onSendPerm: function(ok){ toast(ok?'دلوقتي تقدر تبعت، دوس «ابعت» تاني':'من غير الإذن ده مينفعش يبعت رسايل'); },
   onSent: function(ok, why){

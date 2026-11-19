@@ -78,6 +78,8 @@ class WatchService : Service() {
         try { Freeze.beat(this) } catch (_: Exception) { }   // a long silence before this start = the phone held the app
         if (thread == null) watch()
         TickReceiver.next(this)
+        try { Remote.keep(this) } catch (_: Exception) { }   // the line the iPhone's transfer requests come on (when turned on)
+        NoteListener.rebind(this)
         handler?.post(scan)   // anything that came while the watcher was stopped
         return START_STICKY
     }
@@ -201,8 +203,9 @@ class TickReceiver : BroadcastReceiver() {
             val app = ctx.applicationContext
             val am = app.getSystemService(AlarmManager::class.java) ?: return
             val pi = PendingIntent.getBroadcast(app, 3, Intent(app, TickReceiver::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            // محافظي is the SMS app: every SMS reaches it anyway, so no ⏰ every minute (it didn't get past the freeze either)
-            if (SmsApp.isDefault(app)) { try { am.cancel(pi) } catch (_: Exception) { }; return }
+            // محافظي is the SMS app, or has notification access: every SMS reaches it anyway, so no ⏰ every minute
+            // (it didn't get past the freeze either)
+            if (SmsApp.isDefault(app) || NoteListener.granted(app)) { try { am.cancel(pi) } catch (_: Exception) { }; return }
             val at = System.currentTimeMillis() + EVERY
             Store(app).putLong("tick_at", at)
             try {
@@ -228,6 +231,7 @@ class TickReceiver : BroadcastReceiver() {
         }
         next(context)
         try { Freeze.beat(context) } catch (_: Exception) { }
+        try { Remote.keep(context) } catch (_: Exception) { }
         val pending = goAsync()
         Thread {
             try { SmsSource.catchUp(context, "tick") } catch (_: Exception) { } finally { pending.finish() }

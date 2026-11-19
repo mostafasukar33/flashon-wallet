@@ -30,7 +30,7 @@ object Sync {
     private val rnd = SecureRandom()
 
     private fun b64(b: ByteArray) = Base64.encodeToString(b, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
-    private fun unb64(s: String) = Base64.decode(s, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+    fun unb64(s: String): ByteArray = Base64.decode(s, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
     private fun random(n: Int) = ByteArray(n).also { rnd.nextBytes(it) }
     private fun sha(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b)
 
@@ -77,7 +77,11 @@ object Sync {
         store.putLong("sync_ok", 0)
     }
 
-    private fun send(method: String, path: String, store: Store, body: ByteArray?, extra: Map<String, String> = emptyMap()): Int {
+    private fun send(method: String, path: String, store: Store, body: ByteArray?, extra: Map<String, String> = emptyMap()): Int =
+        call(method, path, store, body, extra, read = false).first
+
+    /** One request to the server as this phone (its upload token). Returns the code and, if [read], the answer. Blocking. */
+    fun call(method: String, path: String, store: Store, body: ByteArray? = null, extra: Map<String, String> = emptyMap(), read: Boolean = true): Pair<Int, String> {
         val c = URL(HOST + path).openConnection() as HttpURLConnection
         for ((k, v) in extra) c.setRequestProperty(k, v)
         c.requestMethod = method
@@ -91,11 +95,27 @@ object Sync {
             c.outputStream.use { it.write(body) }
         }
         val code = c.responseCode
+        val text = if (read && code in 200..299) try { c.inputStream.bufferedReader().use { it.readText() } } catch (_: Exception) { "" } else ""
         c.disconnect()
-        return code
+        return Pair(code, text)
     }
 
-    /** [version][iv 12][AES-GCM(data) + tag]. Version 1 = gzipped screen data, 2 = a notification. */
+    /** Bound into every request from the iPhone, so nothing locked for another use can pass for one (same in view.html). */
+    val CMD_AAD = "flashon-cmd-v3".toByteArray(Charsets.US_ASCII)
+
+    /** Opens what the iPhone locked with the same key (version 3 = a transfer request), or null if it isn't ours. */
+    fun open(store: Store, version: Int, sealed: ByteArray): ByteArray? {
+        if (sealed.size < 30 || sealed[0].toInt() != version) return null
+        val key = unb64(store.getStr("sync_key") ?: return null)
+        return try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, sealed, 1, 12))
+            if (version == 3) cipher.updateAAD(CMD_AAD)
+            cipher.doFinal(sealed, 13, sealed.size - 13)
+        } catch (_: Exception) { null }
+    }
+
+    /** [version][iv 12][AES-GCM(data) + tag]. Version 1 = gzipped screen data, 2 = a notification, 3 = a request from the iPhone. */
     private fun seal(store: Store, version: Int, data: ByteArray): ByteArray {
         val key = unb64(store.getStr("sync_key") ?: throw IllegalStateException())
         val iv = random(12)
@@ -126,6 +146,8 @@ object Sync {
             ";seen=" + WatchService.seen.entries.joinToString(",") { it.key + ":" + (System.currentTimeMillis() - it.value) / 1000 + "x" + (WatchService.counts[it.key] ?: 0) } +
             Freeze.diag(Store(ctx)) + Freeze.notesDiag(ctx) +
             ";def=" + (if (SmsApp.isDefault(ctx)) 1 else 0) + ";sl=" + smsc + ";se=" + (Store(ctx).getStr("sms_last") ?: "") +
+            ";nl=" + (if (NoteListener.granted(ctx)) 1 else 0) + (if (NoteListener.connected) "c" else "") +
+            ";acc=" + (if (Xfer.accOn(ctx)) 1 else 0) + ";rx=" + (if (Xfer.remoteOn(Store(ctx))) 1 else 0) + Remote.diag() +
             ";snd=" + (if (ctx.checkSelfPermission(android.Manifest.permission.SEND_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED) 1 else 0) +
             ";v=" + try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode } catch (_: Exception) { 0 }
     }
@@ -190,7 +212,9 @@ object Sync {
         try {
             val o = JSONObject(screenJson ?: DataJson.build(ctx, store))
             // the other phone only looks: drop what belongs to this phone alone
-            o.remove("sync"); o.remove("update"); o.remove("batteryOk"); o.remove("watch"); o.remove("notifOk"); o.remove("hold"); o.remove("notes"); o.remove("smsApp")
+            o.remove("sync"); o.remove("update"); o.remove("batteryOk"); o.remove("watch"); o.remove("notifOk"); o.remove("hold"); o.remove("notes"); o.remove("smsApp"); o.remove("listen")
+            // transfers: the iPhone needs the wallets, whether this phone is ready, and the list; not the code or the permissions
+            o.optJSONObject("xfer")?.let { x -> for (k in listOf("perm", "phone", "acc", "code", "def", "line")) x.remove(k) }
             // full message text, so opening a transaction there shows the SMS too
             val ids = HashSet<String>()
             val txs = o.optJSONArray("txs")

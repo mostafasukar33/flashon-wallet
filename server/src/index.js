@@ -3,6 +3,8 @@
 // a notification (Web Push) the moment a wallet SMS lands on the Android.
 // The server never sees the password, the key or any number: it holds scrambled bytes, a hash of the
 // phone's upload token, and a hash of the "proof" (made from the key) a viewer must show to download.
+// Transfers from the iPhone: the iPhone locks the request (number, amount, PIN) with the same key; the
+// server keeps the scrambled bytes 10 minutes at most and says "cmd" to the Android on its WebSocket.
 import { DurableObject } from 'cloudflare:workers';
 import VIEW from './view.html';
 import SW from './sw.txt';
@@ -13,6 +15,8 @@ const CHUNK = 900 * 1024;         // under the 1 MB SQLite row limit
 const ID = /^[A-Za-z0-9_-]{16}$/;
 const TRIES = 10, LOCK_MS = 60 * 60 * 1000;   // wrong passwords: 10, then wait an hour
 const MAX_SUBS = 10;
+const CMD_TTL = 10 * 60 * 1000, CMD_MAX = 20, CMD_SIZE = 2000;   // a transfer request: kept 10 minutes at most
+const LIVE_MS = 11 * 60 * 1000;   // the Android pings every 4 minutes (longer while the phone sleeps)
 const PUSH_HOSTS = /^(web\.push\.apple\.com|fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|[a-z0-9.-]+\.notify\.windows\.com)$/;
 
 const HEAD = '<meta name="robots" content="noindex,nofollow">' +
@@ -91,12 +95,28 @@ export class Box extends DurableObject {
     this.env = env;
     this.sql = ctx.storage.sql;
     this.tables();
+    // the Android's ping is answered without waking this box up (no cost while it waits)
+    try { ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong')); } catch {}
   }
   tables() {
     this.sql.exec('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS part (n INTEGER PRIMARY KEY, b BLOB)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS sub (endpoint TEXT PRIMARY KEY, p256dh TEXT, auth TEXT, at INTEGER)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS cmd (n INTEGER PRIMARY KEY AUTOINCREMENT, b BLOB, at INTEGER)');
   }
+  /** Is the Android's line open and did it ping lately. */
+  live() {
+    const now = Date.now();
+    return this.ctx.getWebSockets('phone').some(ws => {
+      let a = {}; try { a = ws.deserializeAttachment() || {}; } catch {}
+      let t = a.at || 0;
+      try { const r = this.ctx.getWebSocketAutoResponseTimestamp(ws); if (r) t = Math.max(t, r.getTime()); } catch {}
+      return now - t < LIVE_MS;
+    });
+  }
+  webSocketMessage(ws, msg) { if (msg === 'ping') try { ws.send('pong'); } catch {} }
+  webSocketClose(ws, code) { try { ws.close(code, 'bye'); } catch {} }
+  webSocketError(ws) { try { ws.close(1011, 'error'); } catch {} }
   meta(k) { const r = this.sql.exec('SELECT v FROM meta WHERE k=?', k).toArray()[0]; return r ? r.v : null; }
   setMeta(k, v) { this.sql.exec('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)', k, String(v)); }
 
@@ -113,11 +133,26 @@ export class Box extends DurableObject {
 
   async fetch(req) {
     const url = new URL(req.url);
-    const sub = url.pathname.endsWith('/sub'), push = url.pathname.endsWith('/push');
+    const tail = (url.pathname.match(/\/(sub|push|cmd|ws)$/) || [])[1] || '';
+    const sub = tail === 'sub', push = tail === 'push';
+    const ask = tail === 'cmd' && req.method === 'POST';   // the iPhone asks the Android for a transfer
 
-    if (req.method === 'GET' || sub) {
+    if ((req.method === 'GET' && !tail) || sub || ask) {
       const v = await this.viewerOk(req);
       if (v.res) return v.res;
+      if (ask) {
+        const body = new Uint8Array(await req.arrayBuffer());
+        if (body.length < 30 || body.length > CMD_SIZE || body[0] !== 3) return json({ error: 'bad' }, 400);
+        const now = Date.now();
+        this.sql.exec('DELETE FROM cmd WHERE at < ?', now - CMD_TTL);
+        this.sql.exec('INSERT INTO cmd (b, at) VALUES (?, ?)', body.buffer, now);
+        this.sql.exec('DELETE FROM cmd WHERE n NOT IN (SELECT n FROM cmd ORDER BY n DESC LIMIT ?)', CMD_MAX);
+        let told = 0;
+        for (const ws of this.ctx.getWebSockets('phone')) { try { ws.send('cmd'); told++; } catch {} }
+        const live = this.live();
+        console.log('cmd', JSON.stringify({ live, told }));   // the log only: no content (it's locked anyway)
+        return json({ ok: true, live });
+      }
       if (sub) {
         if (req.method === 'POST') {
           const s = await req.json().catch(() => null);
@@ -134,9 +169,10 @@ export class Box extends DurableObject {
         return json({ error: 'method' }, 405);
       }
       const at = this.meta('at');
-      if (url.searchParams.get('since') === at) return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store', 'X-At': at } });
+      const live = this.live() ? '1' : '0';   // the iPhone shows whether the Android can take a transfer right now
+      if (url.searchParams.get('since') === at) return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store', 'X-At': at, 'X-Live': live } });
       const parts = this.sql.exec('SELECT b FROM part ORDER BY n').toArray().map(r => new Uint8Array(r.b));
-      return new Response(cat(...parts), { headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-At': at, ...SECURITY } });
+      return new Response(cat(...parts), { headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-At': at, 'X-Live': live, ...SECURITY } });
     }
 
     // from here on: only the Android phone that made the link
@@ -146,8 +182,37 @@ export class Box extends DurableObject {
     const owner = this.meta('tok');
     if (owner && owner !== h) return json({ error: 'token' }, 403);
 
+    if (tail === 'ws') {
+      // the quiet line: the Android keeps it open, and hears "cmd" the moment a request lands
+      if ((req.headers.get('Upgrade') || '').toLowerCase() !== 'websocket') return json({ error: 'upgrade' }, 426);
+      if (!owner) return json({ error: 'gone' }, 404);
+      const old = this.ctx.getWebSockets('phone');
+      for (const w of old.slice(0, Math.max(0, old.length - 2))) try { w.close(1000, 'new'); } catch {}
+      const pair = new WebSocketPair();
+      this.ctx.acceptWebSocket(pair[1], ['phone']);
+      pair[1].serializeAttachment({ at: Date.now() });
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+
+    if (tail === 'cmd') {
+      if (!owner) return json({ error: 'gone' }, 404);
+      this.sql.exec('DELETE FROM cmd WHERE at < ?', Date.now() - CMD_TTL);
+      if (req.method === 'GET') {
+        const rows = this.sql.exec('SELECT n, b FROM cmd ORDER BY n').toArray();
+        return json({ cmds: rows.map(r => ({ n: r.n, b: b64u(r.b) })) });
+      }
+      if (req.method === 'DELETE') {
+        this.sql.exec('DELETE FROM cmd WHERE n <= ?', +(url.searchParams.get('upto') || 0));
+        return json({ ok: true });
+      }
+      return json({ error: 'method' }, 405);
+    }
+
     if (req.method === 'DELETE') {
-      if (owner) { await this.ctx.storage.deleteAll(); this.tables(); }
+      if (owner) {
+        for (const w of this.ctx.getWebSockets()) try { w.close(1000, 'gone'); } catch {}
+        await this.ctx.storage.deleteAll(); this.tables();
+      }
       return json({ ok: true });
     }
 
@@ -196,7 +261,7 @@ export default {
     const url = new URL(req.url);
     const p = url.pathname;
 
-    const m = p.match(/^\/api\/s\/([^/]+)(\/sub|\/push)?$/);
+    const m = p.match(/^\/api\/s\/([^/]+)(\/sub|\/push|\/cmd|\/ws)?$/);
     if (m) {
       if (!ID.test(m[1])) return json({ error: 'id' }, 404);
       return env.BOX.get(env.BOX.idFromName(m[1])).fetch(req);
