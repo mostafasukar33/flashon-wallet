@@ -252,6 +252,16 @@ fun main() {
     check("page 2: confirm for another number = stop", Ussd.step("1:تأكيد\n2:إلغاء", true, "01099999999", true, false, page1) == Ussd.Step.STOP)
     check("page with the PIN and more: the PIN first", Ussd.step("ادخل الرقم السري 0:مزيد", true, me, false, false) == Ussd.Step.PIN)
 
+    // ---- the rest of Vodafone's real transfer (second screenshot) ----
+    val pinPage = "ع******** ادخل الرقم السري 1:للإعادة 2:لمعرفة الرسوم 00:رجوع"
+    check("real PIN page", Ussd.step(pinPage, true, me, false, false, page1) == Ussd.Step.PIN, Ussd.step(pinPage, true, me, false, false, page1))
+    val donePage = "تم تحويل 5 جنيه لرقم 01005174644 مصاريف الخدمة 1 جنيه . اطلب #9* و اشحن 0:مزيد"
+    check("real done page with 0:مزيد = done, no more pages", Ussd.step(donePage, true, me, true, false) == Ussd.Step.OK, Ussd.step(donePage, true, me, true, false))
+    check("done for another number isn't", Ussd.step(donePage, true, "01099999999", true, false) != Ussd.Step.OK)
+    check("'will be transferred' isn't done", Ussd.step("سيتم تحويل 500 جنيه إلى 01012345678 للتأكيد اضغط 1", true, "01012345678", true, false) == Ussd.Step.CONFIRM)
+    check("'wasn't transferred' isn't done", Ussd.step("عفوا لم يتم تحويل 500 جنيه لرقم 01012345678 0:مزيد", true, "01012345678", true, false) != Ussd.Step.OK)
+    check("the ad after it = stop", Ussd.step("دلوقتي لاستخدام محفظتك دوس 1 00:رجوع", true, me, true, false) == Ussd.Step.STOP)
+
     // ---- a question, even when it comes as a notification ----
     check("asks: PIN", Ussd.asks("لتأكيد تحويل 500 جنيه الى 01012345678 ادخل الرقم السري"))
     check("asks: confirm", Ussd.asks("سيتم تحويل 500 جنيه. للتأكيد اضغط 1"))

@@ -81,7 +81,8 @@ object Ussd {
     private val PIN = rx("الرقم السري|الرقم السرى|رقم سري|رقم سرى|رقمك السري|الرقم السري الخاص|كلمة السر|كلمه السر|كلمة المرور|كلمه المرور|الباسورد|\\bpin\\b|password|passcode|secret code")
     private val CONFIRM = rx("للتأكيد|للتاكيد|لتأكيد|لتاكيد|تأكيد|تاكيد|confirm|هل تريد|هل انت متأكد|هل أنت متأكد|موافق\\s*؟|اضغط\\s*1|ادخل\\s*1|أدخل\\s*1|1\\s*[-.:)]\\s*(نعم|موافق|تأكيد|تاكيد|yes|ok|confirm)")
     private val WRONG = rx("غير صحيح|خطأ|خاطئ|غلط|incorrect|invalid|wrong|غير كاف|insufficient|فشل|لم تتم|لم يتم|failed|declined|مرفوض|تم رفض|تجاوز|exceeded|غير مسموح|not allowed|غير متاح|unavailable|موقوف|blocked|مغلق|تعذر|نأسف|عفوا|sorry|try again|حاول مره|حاول مرة|connection problem|غير مسجل|not registered|غير مشترك")
-    private val STRONG_OK = rx("تم التحويل|تم تحويل|تمت عملية التحويل|بنجاح|successful")
+    // "تم تحويل" as words of its own: not inside "سيتم تحويل" (will be) or "لم يتم تحويل" (wasn't)
+    private val STRONG_OK = rx("(?<!\\p{L})(?:تم التحويل|تم تحويل|تمت عملية التحويل)|بنجاح|successful")
     private val DONE = rx("تم التحويل|تم تحويل|تمت عملية|تمت العملية|تم ارسال|تم إرسال|بنجاح|successful|success|has been transferred|transferred|سيتم تحويل|جاري تنفيذ طلبك|جاري التنفيذ|تم استلام طلبك|طلبك قيد التنفيذ|سيصلك")
 
     /** Does this text ask something (the PIN, or to confirm): a question, even when it comes as a notification. */
@@ -124,6 +125,9 @@ object Ussd {
             if (wrong) return Step.FAIL
             return if (DONE.containsMatchIn(t)) Step.OK else Step.UNSURE
         }
+        // Vodafone's "done" for this same number, even with a box under it ("… اطلب #9* و اشحن 0:مزيد"):
+        // the transfer went through, and what comes after it is ads, so nothing more is sent
+        if (STRONG_OK.containsMatchIn(t) && !WRONG.containsMatchIn(t) && namesNumber(clean(before) + "\n" + t, to)) return Step.OK
         // a question: the PIN once; the rest of a long message before any confirmation;
         // a confirmation once and only for the same number; nothing else
         if (PIN.containsMatchIn(t)) return if (pinSent) Step.STOP else Step.PIN

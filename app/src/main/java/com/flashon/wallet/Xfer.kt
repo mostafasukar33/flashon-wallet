@@ -411,7 +411,8 @@ object Xfer {
                 main.postDelayed({ tap(svc, true) }, 350)
             }
             Ussd.Step.STOP -> { tap(svc, false); end(svc, j, "stop", j.pages.toString() + s.text) }
-            Ussd.Step.OK -> { tap(svc, true); end(svc, j, "ok", s.text) }
+            // done: an answer screen is closed with OK; a "done" with a box under it is closed without sending anything
+            Ussd.Step.OK -> { tap(svc, s.input == null); end(svc, j, "ok", s.text) }
             Ussd.Step.FAIL -> { tap(svc, true); end(svc, j, "fail", s.text) }
             Ussd.Step.UNSURE -> { tap(svc, true); end(svc, j, "unsure", s.text) }
         }
@@ -481,6 +482,7 @@ object Xfer {
                 return
             }
             when (Ussd.step(text, true, j.to, j.pinSent, j.confirmSent, j.pages.toString())) {
+                Ussd.Step.OK -> end(ctx, j, "ok", text)   // Vodafone's "done", with "0:مزيد" for its ads
                 Ussd.Step.MORE -> {
                     val key = Ussd.moreKey(text)
                     if (key == null || j.more >= 4 || !reply(ctx, replyAction, key)) { end(ctx, j, "stop", j.pages.toString() + text); return }
