@@ -69,7 +69,9 @@ object Ussd {
         /** The final answer, and it didn't. */
         FAIL,
         /** A final answer that says neither: shown to the user as it is (the SMS from Vodafone tells the rest). */
-        UNSURE
+        UNSURE,
+        /** A long message cut in pages ("… 0:مزيد"): send the key for the rest of it ([moreKey]), only reads more. */
+        MORE
     }
 
     /** Written the way a person would; matched after the same folding as the screen text (أ→ا, ة→ه, ى→ي). */
@@ -99,7 +101,21 @@ object Ussd {
      * [hasInput] the screen has a box to type in (a question); without one it's the final answer.
      * [pinSent] / [confirmSent] what was already done in this transfer.
      */
-    fun step(text: String, hasInput: Boolean, to: String, pinSent: Boolean, confirmSent: Boolean): Step {
+    // "0:مزيد", "0- المزيد", "للمزيد اضغط 0", "المزيد: 00", "0 more"
+    private val MORE_AFTER = Regex("(?:^|[\\s\\n])([0-9#*]{1,2})\\s*[:：\\-.)]?\\s*(?:مزيد|المزيد|للمزيد|التالي|more|next)", RegexOption.IGNORE_CASE)
+    private val MORE_BEFORE = Regex("(?:مزيد|المزيد|للمزيد|التالي|more|next)\\s*(?:اضغط|ادخل|أدخل|اطلب|press)?\\s*[:：\\-]?\\s*([0-9#*]{1,2})(?![0-9])", RegexOption.IGNORE_CASE)
+
+    /** The key that shows the rest of a long message, or null if this page says nothing about more. */
+    fun moreKey(text: String): String? {
+        val t = Parser.normalize(text)
+        return MORE_AFTER.find(t)?.groupValues?.get(1) ?: MORE_BEFORE.find(t)?.groupValues?.get(1)
+    }
+
+    /**
+     * What to do with one USSD screen.
+     * [before] the pages already read of the same message (it was cut in pages): the number may be on the first.
+     */
+    fun step(text: String, hasInput: Boolean, to: String, pinSent: Boolean, confirmSent: Boolean, before: String = ""): Step {
         val t = clean(text)
         if (t.isBlank()) return Step.WAIT
         if (!hasInput) {
@@ -108,11 +124,13 @@ object Ussd {
             if (wrong) return Step.FAIL
             return if (DONE.containsMatchIn(t)) Step.OK else Step.UNSURE
         }
-        // a question: the PIN once, a confirmation once and only for the same number, nothing else
+        // a question: the PIN once; the rest of a long message before any confirmation;
+        // a confirmation once and only for the same number; nothing else
         if (PIN.containsMatchIn(t)) return if (pinSent) Step.STOP else Step.PIN
+        if (moreKey(text) != null) return Step.MORE
         if (CONFIRM.containsMatchIn(t)) {
             if (confirmSent) return Step.STOP
-            return if (namesNumber(t, to)) Step.CONFIRM else Step.STOP
+            return if (namesNumber(clean(before) + "\n" + t, to)) Step.CONFIRM else Step.STOP
         }
         return Step.STOP
     }

@@ -825,6 +825,7 @@ function xferCheck(f){
   if (!to) return 'اكتب رقم موبايل مصري صح';
   if (!/^[0-9]+$/.test(a) || +a<1 || +a>60000) return 'المبلغ جنيهات صحيحة من 1 لـ 60,000';
   if (!/^[0-9]{4,8}$/.test(f.pin)) return 'الرقم السري أرقام بس';
+  var acc=xferAcc(); if (acc && acc.own && acc.own===to) return 'ده رقم المحفظة نفسها اللي بتحوّل منها، اختار رقم تاني';
   f.to=to; f.a=String(+a); return '';
 }
 

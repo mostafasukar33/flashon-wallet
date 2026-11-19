@@ -68,12 +68,15 @@ object Xfer {
         @Volatile var done = false
         @Volatile var last = ""
         @Volatile var lastNote = ""
+        /** The pages already read of a message Vodafone cut in pages ("… 0:مزيد"), and how many. */
+        val pages = StringBuilder()
+        @Volatile var more = 0
         /** Questions already answered: the same one coming as a screen and as a notification is answered once. */
         private val answered = HashSet<String>()
         @Synchronized fun claim(text: String): Boolean = answered.add(text.replace(Regex("\\s+"), " ").trim())
         /** What Vodafone showed and what the app did, for the list (never the PIN). */
         val trace = java.util.Collections.synchronizedList(ArrayList<String>())
-        fun log(s: String) { trace.add(s.replace(Regex("\\s+"), " ").trim().take(140)); if (trace.size > 12) trace.removeAt(0) }
+        fun log(s: String) { trace.add(s.replace(Regex("\\s+"), " ").trim().take(220)); if (trace.size > 12) trace.removeAt(0) }
         /** The PIN, once: it's gone from memory right after. */
         fun takePin(): String? { val p = pin ?: return null; pin = null; val s = String(p); p.fill('0'); return s }
         fun wipe() { pin?.fill('0'); pin = null }
@@ -382,11 +385,18 @@ object Xfer {
         j.last = key
         j.seen = true
         j.log("شاشة: " + s.text)
-        val step = Ussd.step(s.text, s.input != null, j.to, j.pinSent, j.confirmSent)
-        // a question already answered from its notification: nothing more to do here
-        if (s.input != null && Ussd.asks(s.text) && !j.claim(s.text)) return
+        val step = Ussd.step(s.text, s.input != null, j.to, j.pinSent, j.confirmSent, j.pages.toString())
+        // a question already answered (from its notification, or this same screen): nothing more to do here
+        if (s.input != null && step in ANSWERS && !j.claim(s.text)) return
         when (step) {
             Ussd.Step.WAIT -> { }
+            Ussd.Step.MORE -> {
+                val key = Ussd.moreKey(s.text)
+                if (key == null || j.more >= 4 || !type(s.input!!, key)) { tap(svc, false); end(svc, j, "stop", j.pages.toString() + s.text); return }
+                j.more++; j.pages.append(s.text).append('\n')
+                j.log("طلب باقي الرسالة ($key)")
+                main.postDelayed({ tap(svc, true) }, 350)
+            }
             Ussd.Step.PIN -> {
                 j.log("كتب الرقم السري في الشاشة")
                 val pin = j.takePin()
@@ -400,7 +410,7 @@ object Xfer {
                 j.confirmSent = true
                 main.postDelayed({ tap(svc, true) }, 350)
             }
-            Ussd.Step.STOP -> { tap(svc, false); end(svc, j, "stop", s.text) }
+            Ussd.Step.STOP -> { tap(svc, false); end(svc, j, "stop", j.pages.toString() + s.text) }
             Ussd.Step.OK -> { tap(svc, true); end(svc, j, "ok", s.text) }
             Ussd.Step.FAIL -> { tap(svc, true); end(svc, j, "fail", s.text) }
             Ussd.Step.UNSURE -> { tap(svc, true); end(svc, j, "unsure", s.text) }
@@ -408,6 +418,8 @@ object Xfer {
     }
 
     // ---------- Vodafone's answer as a notification ----------
+
+    private val ANSWERS = setOf(Ussd.Step.PIN, Ussd.Step.CONFIRM, Ussd.Step.MORE)
 
     private val VF_WORDS = Regex("فودافون|كاش|محفظ|جنيه|رصيد|تحويل|vodafone|cash|wallet|ussd|mmi|\\b1\\s*[-.)]", RegexOption.IGNORE_CASE)
 
@@ -460,7 +472,7 @@ object Xfer {
         j.seen = true
         val replyAction = n.actions?.firstOrNull { !it.remoteInputs.isNullOrEmpty() }
         j.log("إشعار" + (if (replyAction != null) " فيه رد" else "") + ": " + text)
-        if (Ussd.asks(text)) {
+        if (Ussd.asks(text) || Ussd.moreKey(text) != null) {
             if (!j.claim(text)) return
             if (replyAction == null) {
                 // no reply box in it: open it, so Vodafone's box shows on the screen
@@ -468,7 +480,12 @@ object Xfer {
                 if (!send(ctx, n.contentIntent, null)) j.log("مقدرش يفتح الإشعار")
                 return
             }
-            when (Ussd.step(text, true, j.to, j.pinSent, j.confirmSent)) {
+            when (Ussd.step(text, true, j.to, j.pinSent, j.confirmSent, j.pages.toString())) {
+                Ussd.Step.MORE -> {
+                    val key = Ussd.moreKey(text)
+                    if (key == null || j.more >= 4 || !reply(ctx, replyAction, key)) { end(ctx, j, "stop", j.pages.toString() + text); return }
+                    j.more++; j.pages.append(text).append('\n'); j.log("طلب باقي الرسالة من الإشعار ($key)")
+                }
                 Ussd.Step.PIN -> {
                     val pin = j.takePin()
                     if (pin == null || !reply(ctx, replyAction, pin)) { end(ctx, j, "stop", "مقدرتش أكتب الرقم السري في إشعار فودافون"); return }
@@ -478,7 +495,7 @@ object Xfer {
                     if (!reply(ctx, replyAction, "1")) { end(ctx, j, "stop", "مقدرتش أأكد في إشعار فودافون"); return }
                     j.confirmSent = true; j.log("رد على الإشعار بـ 1")
                 }
-                else -> end(ctx, j, "stop", text)   // a second PIN question, or a confirmation for another number
+                else -> end(ctx, j, "stop", j.pages.toString() + text)   // a second PIN question, or a confirmation for another number
             }
             return
         }

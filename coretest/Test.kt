@@ -240,6 +240,18 @@ fun main() {
     check("ussd limit", st("عفواً لقد تجاوزت الحد اليومي للتحويل", false, pin = true) == Ussd.Step.FAIL)
     check("ussd unsure", st("طلبك وصل وهيتراجع", false, pin = true) == Ussd.Step.UNSURE)
 
+    // ---- Vodafone's real screen, cut in pages ("0:مزيد") ----
+    val me = "01005174644"
+    val page1 = "لتحويل 5 ج بالإضافة لـ1 ج رسوم لرقم 01005174644 بإسم مصطفى م*** م**** 0:مزيد"
+    check("real page 1: asks for the rest", Ussd.step(page1, true, me, false, false) == Ussd.Step.MORE, Ussd.step(page1, true, me, false, false))
+    check("real page 1: the key is 0", Ussd.moreKey(page1) == "0", Ussd.moreKey(page1))
+    check("more key: other wordings", Ussd.moreKey("للمزيد اضغط 00") == "00" && Ussd.moreKey("المزيد: 0") == "0" && Ussd.moreKey("0- المزيد") == "0" && Ussd.moreKey("9 more") == "9")
+    check("more key: none", Ussd.moreKey("لمزيد من المعلومات اتصل بخدمة العملاء") == null && Ussd.moreKey("ادخل الرقم السري") == null)
+    check("page 2: the PIN", Ussd.step("ادخل الرقم السري للتأكيد", true, me, false, false, page1) == Ussd.Step.PIN)
+    check("page 2: confirm, the number was on page 1", Ussd.step("1:تأكيد\n2:إلغاء", true, me, true, false, page1) == Ussd.Step.CONFIRM)
+    check("page 2: confirm for another number = stop", Ussd.step("1:تأكيد\n2:إلغاء", true, "01099999999", true, false, page1) == Ussd.Step.STOP)
+    check("page with the PIN and more: the PIN first", Ussd.step("ادخل الرقم السري 0:مزيد", true, me, false, false) == Ussd.Step.PIN)
+
     // ---- a question, even when it comes as a notification ----
     check("asks: PIN", Ussd.asks("لتأكيد تحويل 500 جنيه الى 01012345678 ادخل الرقم السري"))
     check("asks: confirm", Ussd.asks("سيتم تحويل 500 جنيه. للتأكيد اضغط 1"))
