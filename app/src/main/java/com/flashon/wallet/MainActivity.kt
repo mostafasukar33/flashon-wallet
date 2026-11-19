@@ -569,6 +569,26 @@ class MainActivity : Activity() {
             }
         }
 
+        /** The phone's screen lock settings (to set it to "swipe" with no password, so transfers run while it's locked). */
+        @JavascriptInterface
+        fun openLockSettings() {
+            main.post {
+                for (a in listOf(Settings.ACTION_SECURITY_SETTINGS, Settings.ACTION_SETTINGS))
+                    try { startActivity(Intent(a).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return@post } catch (_: Exception) { }
+            }
+        }
+
+        /** The messages notifications' own settings (sound, pop-up) when the phone made them quiet. */
+        @JavascriptInterface
+        fun openSmsNotif() {
+            main.post {
+                val i = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName).putExtra(Settings.EXTRA_CHANNEL_ID, SmsApp.CH_MSGS)
+                try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {
+                    try { startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
+                }
+            }
+        }
+
         /** Transfers asked from the iPhone: on or off (needs the link on). */
         @JavascriptInterface
         fun setXferRemote(on: Boolean) {

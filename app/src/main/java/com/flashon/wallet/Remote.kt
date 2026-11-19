@@ -53,8 +53,9 @@ object Remote {
         val c = JSONObject(String(plain, Charsets.UTF_8))
         val cid = c.optString("id").filter { it.isLetterOrDigit() }.take(32)
         if (cid.length < 8 || seen(store, cid)) return
-        if (c.optString("k") != "xfer") return
         val age = System.currentTimeMillis() - c.optLong("t")
+        if (c.optString("k") == "sms") { sms(app, store, c, age); return }
+        if (c.optString("k") != "xfer") return
         val to = c.optString("to"); val a = c.optString("a"); val w = c.optString("w")
         val base = JSONObject().put("to", to.take(20)).put("a", a.toLongOrNull() ?: 0).put("from", "iphone").put("w", w)
         val why = when {
@@ -70,6 +71,28 @@ object Remote {
             return
         }
         Xfer.start(app, to, a, c.optString("pin"), w, "iphone", cid)
+    }
+
+    /**
+     * An SMS asked from the iPhone ({to, body, sub}): sent from this phone's line like any reply, kept in the
+     * conversation, and the iPhone's messages tabs get it with the next upload. Same rules as a transfer: only
+     * locked with the account's key, fresh, once, and with «التحويل والرسايل من الآيفون» on.
+     */
+    private fun sms(app: Context, store: Store, c: JSONObject, age: Long) {
+        val to = c.optString("to").trim()
+        val body = c.optString("body").trim()
+        val why = when {
+            age > MAX_AGE || age < -3 * 60_000L -> "الرسالة وصلت الأندرويد متأخر، ومتبعتتش. ابعتها تاني"
+            !Xfer.remoteOn(store) -> "الإرسال من الآيفون مقفول من إعدادات «محافظي» على الأندرويد"
+            to.count { it.isDigit() } < 3 || body.isEmpty() || body.length > 1500 -> "الرسالة أو الرقم مش مظبوطين"
+            !SmsApp.isDefault(app) -> "«محافظي» مش تطبيق الرسايل على الأندرويد"
+            else -> null
+        }
+        if (why != null) { try { Sync.notify(app, store, listOf(Notifier.Msg("✗ الرسالة متبعتتش", why, "s" + c.optString("id")))) } catch (_: Exception) { }; return }
+        val sub = c.optInt("sub", -1)
+        SmsApp.send(app, to, body, if (SmsApp.valid(sub)) sub else -1)
+        MainActivity.smsChanged()
+        try { Sync.pushIfOn(app, store) } catch (_: Exception) { }
     }
 
     /** Each request runs once, even if the server sends it again. */

@@ -120,7 +120,7 @@ object Notifier {
                 else -> null
             } ?: continue
             out += m
-            if (store.txNotify) post(ctx, 1000 + (p.sms.id.hashCode() and 0x7ffffff), m.title, m.text, CH_TX)
+            if (store.txNotify && !SmsApp.isDefault(ctx)) post(ctx, 1000 + (p.sms.id.hashCode() and 0x7ffffff), m.title, m.text, CH_TX)
         }
         return out
     }

@@ -120,6 +120,11 @@
             android:name=".SmsSentReceiver"
             android:exported="false" />
 
+        <!-- «رد» and «اتقرت» on a message notification -->
+        <receiver
+            android:name=".SmsReplyReceiver"
+            android:exported="false" />
+
         <service
             android:name=".RespondService"
             android:exported="true"

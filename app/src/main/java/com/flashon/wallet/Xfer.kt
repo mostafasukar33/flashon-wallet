@@ -38,8 +38,6 @@ import com.flashon.wallet.core.Wallet
 import org.json.JSONArray
 import org.json.JSONObject
 import java.lang.ref.WeakReference
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.security.SecureRandom
 
 /**
@@ -126,7 +124,7 @@ object Xfer {
         val acc = accOn(ctx)
         return JSONObject().put("perm", perm).put("phone", phonePerm(ctx)).put("acc", acc).put("ready", perm && acc)
             .put("remote", remoteOn(store)).put("code", template(store)).put("def", Ussd.DEFAULT_VF)
-            .put("busy", j != null && !j.done).put("line", Remote.state).put("smsApp", SmsApp.isDefault(ctx)).put("accounts", accs).put("list", history(store))
+            .put("busy", j != null && !j.done).put("line", Remote.state).put("smsApp", SmsApp.isDefault(ctx)).put("secure", lockedWithPassword(ctx)).put("accounts", accs).put("list", history(store))
     }
 
     private fun vfAccounts(led: com.flashon.wallet.core.Ledger) =
@@ -226,8 +224,7 @@ object Xfer {
         j.log(lockState(app))
         note(app, "⏳ بيحوّل ${Notifier.fmt(amount.toDouble())} ج لـ $to", if (from == "iphone") "طلب من الآيفون" else "من «محافظي»", true)
         refresh(app)
-        // with no screen first (works with the phone locked); the usual way if that can't be done
-        Thread { val done = try { silent(app, store, j) } catch (_: Exception) { false }; if (!done) main.post { if (job === j && !j.done) withScreen(app, j) } }.start()
+        withScreen(app, j)
         return null
     }
 
@@ -240,63 +237,18 @@ object Xfer {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS))
         } catch (_: Exception) { }
         main.postDelayed({ if (job === j && !j.dialed) dial(app, j) }, 2500)
+        // locked with a password and Vodafone's screen hasn't shown: tell the iPhone the transfer waits for the phone to be opened
+        main.postDelayed({
+            if (job === j && !j.done && !j.seen && j.from == "iphone" && try { app.getSystemService(KeyguardManager::class.java).let { it.isKeyguardLocked && it.isDeviceSecure } } catch (_: Exception) { false })
+                tellIphone(app, Store(app), "⏳ التحويل مستني تفتح الأندرويد", "الأندرويد مقفول بباسورد، والموبايل مبيسمحش لشاشة فودافون تظهر فوق القفل. أول ما يتفتح التحويل هيكمل، أو خلّي قفله «سحب» من غير باسورد.", j.id)
+        }, 20_000L)
         main.postDelayed({ timeout(app, j, first = true) }, TIMEOUT)
     }
 
-    // ---------- with no screen ----------
 
-    /** Sends one USSD code with no screen and waits for Vodafone's answer: (true, text), (false, why), or null on no answer. Blocking. */
-    @SuppressLint("MissingPermission")   // checked in start()
-    private fun ussd(ctx: Context, sub: Int, code: String, waitMs: Long = 30_000L): Pair<Boolean, String>? {
-        if (Build.VERSION.SDK_INT < 26) return null
-        val base = ctx.getSystemService(TelephonyManager::class.java) ?: return null
-        val tm = if (sub >= 0) base.createForSubscriptionId(sub) else base
-        val latch = CountDownLatch(1)
-        var res: Pair<Boolean, String>? = null
-        try {
-            tm.sendUssdRequest(code, object : TelephonyManager.UssdResponseCallback() {
-                override fun onReceiveUssdResponse(t: TelephonyManager, request: String, response: CharSequence) { res = Pair(true, response.toString()); latch.countDown() }
-                override fun onReceiveUssdResponseFailed(t: TelephonyManager, request: String, failureCode: Int) { res = Pair(false, "رمز $failureCode"); latch.countDown() }
-            }, main)
-        } catch (e: Exception) { return Pair(false, e.javaClass.simpleName) }
-        return if (latch.await(waitMs, TimeUnit.MILLISECONDS)) res else null
-    }
 
-    /**
-     * The transfer with no screen at all, so it works with the phone locked: Android sends the code and hands
-     * back Vodafone's answer as text, one answer per code. Vodafone asks one thing at a time (page 1 "0:مزيد",
-     * then the PIN), so the answers go in the same code joined with "*" (*9*7*number*amount*0*PIN#).
-     * The PIN is added only after the same code without it came back asking for the PIN, so it can never land
-     * on another question. Returns false to do it the usual way (nothing typed yet then); true when it's over.
-     */
-    private fun silent(app: Context, store: Store, j: Job): Boolean {
-        // off for a day after it didn't work on this phone (a network hiccup shouldn't turn it off for good)
-        if (Build.VERSION.SDK_INT < 26 || System.currentTimeMillis() - store.getLong("ussd_silent_off") < 24 * 3600_000L || !j.code.endsWith("#")) return false
-        val base = j.code.dropLast(1)
-        j.log("بيطلب الكود من غير شاشة")
-        val p = Ussd.probe(base, { code -> if (j.done) null else ussd(app, j.sub, code).also { if (it != null && it.first) j.seen = true } }, { j.log(it) })
-        if (p is Ussd.Probe.No) {
-            j.log(p.why)
-            if (p.off) store.putLong("ussd_silent_off", System.currentTimeMillis())
-            return j.done
-        }
-        val pin = (p as Ussd.Probe.Pin).let { j.takePin() } ?: return false
-        // the next thing Vodafone expects is the PIN: from here on it's never sent a second time
-        j.pinSent = true
-        j.log("بعت الرقم السري من غير شاشة")
-        val r = ussd(app, j.sub, base + p.keys + "*" + pin + "#", 45_000L)
-        if (r == null || !r.first) { end(app, j, "unsure", "فودافون مردتش. لو رسالة فودافون جت، التحويل هيتأكد لوحده"); return true }
-        j.log("فودافون (من غير شاشة): " + r.second)
-        when (val v = Ussd.verdict(r.second, j.to, p.before)) {
-            "stop" -> {
-                // a confirmation after the PIN: this time it stops, the next ones the usual way for a day
-                store.putLong("ussd_silent_off", System.currentTimeMillis())
-                end(app, j, "stop", r.second + " (فودافون طلبت تأكيد، التحويل الجاي هيتعمل بالشاشة)")
-            }
-            else -> end(app, j, v, r.second)
-        }
-        return true
-    }
+    /** The phone has a screen lock with a password, PIN, pattern or fingerprint (Vodafone's screen can't show over it). */
+    fun lockedWithPassword(ctx: Context): Boolean = try { ctx.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true } catch (_: Exception) { false }
 
     /** "مقفول بباسورد" / "مقفول من غير باسورد" / "مفتوح": for the step-by-step list. */
     private fun lockState(ctx: Context): String = try {

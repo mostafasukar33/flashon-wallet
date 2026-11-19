@@ -8,6 +8,7 @@
 #vnote .p .go{background:#1E5AA8;color:#fff;white-space:nowrap}
 #vnote .p .x{background:transparent;color:#555A60;padding:0 6px}
 body{padding-bottom:24px}
+body.chatting #vnote{display:none}
 </style>
 <script>
 /* Read-only window on the Android app. The link carries <id>.<salt> after #; the password turns it into the key
@@ -197,6 +198,19 @@ body{padding-bottom:24px}
     getBody:function(x){ return bodies[x]||''; },
     viewing:function(){},   // every redraw says which conversation is open (an Android thing): nothing to do here, and no "Android only" toast
     live:function(){ return live; },
+    /* an SMS from the iPhone, sent by the Android from its line: locked here like a transfer request */
+    sendSms:function(to, text, sub){
+      if (!k64) { App.onSent(false, 'افتح اللينك بالباسورد الأول'); return; }
+      lockCmd({k:'sms', id:rid(), t:Date.now(), to:String(to), body:String(text), sub:(sub==null?-1:+sub)}).then(function(body){
+        return fetch('/api/s/'+id+'/cmd', {method:'POST', cache:'no-store', headers:{'X-Sub':proof,'Content-Type':'application/octet-stream'}, body:body});
+      }).then(function(r){
+        if (r.status===403) throw new Error('الباسورد اتغير، افتح اللينك تاني');
+        if (r.status===404) throw new Error('اللينك ده اتقفل من التطبيق');
+        if (!r.ok) throw new Error('مقدرتش أبعتها، جرب تاني');
+        return r.json();
+      }).then(function(res){ live=res.live?'1':'0'; App.onSent(true, ''); soon(); },
+        function(e){ App.onSent(false, (e && e.message && /[\u0600-\u06FF]/.test(e.message)) ? e.message : 'مفيش نت، جرب تاني'); });
+    },
     /* a transfer from the iPhone: locked here, passed on by the server, run by the Android */
     sendXfer:function(j){
       var o; try{ o=JSON.parse(j); }catch(e){ return; }

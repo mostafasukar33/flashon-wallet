@@ -268,36 +268,6 @@ fun main() {
     check("real MMI error = a hiccup (try again)", Ussd.glitch(mmi) && Ussd.glitch("Connection problem or invalid MMI code."))
     check("a wrong PIN isn't a hiccup", !Ussd.glitch("عفواً، الرقم السري غير صحيح") && !Ussd.glitch("رصيدك غير كافٍ"))
 
-    // ---- the transfer with no screen, against a fake Vodafone that answers like the real one ----
-    val donePg = "تم تحويل 5 جنيه لرقم 01005174644 مصاريف الخدمة 1 جنيه . اطلب #9* و اشحن 0:مزيد"
-    fun vodafone(pages: Boolean, pinOk: Boolean = true): (String) -> Pair<Boolean, String>? = { code ->
-        val parts = code.removeSuffix("#").split("*").drop(5)   // what comes after *9*7*N*A
-        val flow = if (pages) listOf(page1, pinPage) else listOf(pinPage)
-        when {
-            parts.size < flow.size - 1 && parts.all { it == "0" } -> Pair(true, flow[parts.size])
-            parts.size == flow.size - 1 && parts.all { it == "0" } -> Pair(true, flow.last())
-            parts.size == flow.size && parts.dropLast(1).all { it == "0" } && parts.last().length == 6 -> Pair(true, if (pinOk) donePg else "الرقم السري غير صحيح، ادخل الرقم السري مرة اخرى")
-            else -> Pair(true, "Connection problem or invalid MMI code.")
-        }
-    }
-    val sentCodes = ArrayList<String>()
-    val pr = Ussd.probe("*9*7*01005174644*5", { c -> sentCodes += c; vodafone(true)(c) }, { })
-    check("no screen: finds the PIN after the page", pr is Ussd.Probe.Pin && pr.keys == "*0", (pr as? Ussd.Probe.Pin)?.keys)
-    check("no screen: no code before the PIN carries a PIN", sentCodes == listOf("*9*7*01005174644*5#", "*9*7*01005174644*5*0#"), sentCodes)
-    check("no screen: the code with the PIN goes through", vodafone(true)("*9*7*01005174644*5*0*123456#")?.second == donePg)
-    check("no screen: done = ok", Ussd.verdict(donePg, me, (pr as Ussd.Probe.Pin).before) == "ok")
-    val pr2 = Ussd.probe("*9*7*01005174644*5", vodafone(false), { })
-    check("no screen: a short page, the PIN right away (no 0 added)", pr2 is Ussd.Probe.Pin && pr2.keys == "", (pr2 as? Ussd.Probe.Pin)?.keys)
-    check("no screen: wrong PIN = fail", Ussd.verdict("الرقم السري غير صحيح، ادخل الرقم السري مرة اخرى", me, "") == "fail")
-    check("no screen: a confirmation after the PIN = stop", Ussd.verdict("للتأكيد اضغط 1", me, "") == "stop")
-    val pr3 = Ussd.probe("*9*7*01005174644*5", { Pair(true, page1) }, { })
-    check("no screen: chained answers not followed = usual way", pr3 is Ussd.Probe.No && pr3.off)
-    val pr4 = Ussd.probe("*9*7*01005174644*5", { Pair(false, "رمز -1") }, { })
-    check("no screen: not possible on this phone = usual way", pr4 is Ussd.Probe.No && pr4.off)
-    val pr5 = Ussd.probe("*9*7*01005174644*5", { Pair(true, "1- تحويل فلوس\n2- شحن") }, { })
-    check("no screen: another question = usual way, nothing typed", pr5 is Ussd.Probe.No && !pr5.off)
-    check("no screen: no answer = usual way", Ussd.probe("*9*7*01005174644*5", { null }, { }) is Ussd.Probe.No)
-
     // ---- a question, even when it comes as a notification ----
     check("asks: PIN", Ussd.asks("لتأكيد تحويل 500 جنيه الى 01012345678 ادخل الرقم السري"))
     check("asks: confirm", Ussd.asks("سيتم تحويل 500 جنيه. للتأكيد اضغط 1"))

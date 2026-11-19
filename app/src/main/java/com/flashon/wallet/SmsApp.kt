@@ -73,6 +73,7 @@ object SmsApp {
         if (on && at == 0L) store.putLong("smsapp_at", System.currentTimeMillis())
         if (!on && at != 0L) store.putLong("smsapp_at", 0)
         return JSONObject().put("on", on).put("can", available(ctx)).put("at", store.getLong("smsapp_at"))
+            .put("ch", if (on) channelLevel(ctx) else -1)
             .put("unread", if (on) unread(ctx) else 0).put("lines", if (on) unreadByLine(ctx) else JSONArray())
     }
 
@@ -108,42 +109,105 @@ object SmsApp {
         return thread
     }
 
+    /** The messages channel: loud like an SMS app (sound, vibration). "sms" was the first one, made quieter by some phones. */
+    const val CH_MSGS = "msgs"
+
     private fun channel(ctx: Context): NotificationManager? {
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return null
-        if (nm.getNotificationChannel(CH) == null) {
-            nm.createNotificationChannel(NotificationChannel(CH, "الرسايل", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "كل رسالة بتوصل الموبايل، لما «محافظي» يكون تطبيق الرسايل"
+        if (nm.getNotificationChannel(CH_MSGS) == null) {
+            try { nm.deleteNotificationChannel(CH) } catch (_: Exception) { }
+            nm.createNotificationChannel(NotificationChannel(CH_MSGS, "الرسايل", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "كل رسالة بتوصل الموبايل، بصوت زي تطبيق الرسايل"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 250, 150, 250)
+                enableLights(true)
+                setShowBadge(true)
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+                setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI, android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
             })
         }
         return nm
     }
+
+    /** How loud the messages channel is now (4 = with sound and pop-up, less = quiet or off), for the screen and the log. */
+    fun channelLevel(ctx: Context): Int = try {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        if (!nm.areNotificationsEnabled()) 0 else (channel(ctx)?.getNotificationChannel(CH_MSGS)?.importance ?: -1)
+    } catch (_: Exception) { -1 }
 
     private fun canNotify(ctx: Context) = Build.VERSION.SDK_INT < 33 ||
         ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
     fun noteId(thread: Long, sender: String) = 50000 + (if (thread > 0) (thread % 100000).toInt() else (sender.hashCode() and 0xffff))
 
-    /** A notification for a new SMS, like any messages app. Tapping it opens that conversation. */
+    /** The conversation's unread messages, oldest first (shown in the notification like a messages app). */
+    private fun unreadOf(ctx: Context, thread: Long, max: Int): List<Pair<String, Long>> {
+        if (thread <= 0) return emptyList()
+        val out = ArrayList<Pair<String, Long>>()
+        try {
+            ctx.contentResolver.query(Telephony.Sms.Inbox.CONTENT_URI, arrayOf(Telephony.Sms.BODY, Telephony.Sms.DATE),
+                Telephony.Sms.THREAD_ID + "=? AND " + Telephony.Sms.READ + "=0", arrayOf(thread.toString()), Telephony.Sms.DATE + " DESC")?.use { c ->
+                while (c.moveToNext() && out.size < max) out += Pair(c.getString(0) ?: "", c.getLong(1))
+            }
+        } catch (_: Exception) { }
+        return out.reversed()
+    }
+
+    /**
+     * A notification for a new SMS, like a messages app: with sound, the conversation's new messages, a «رد»
+     * box to answer from the notification, and «اتقرت». Tapping it opens that conversation in «محافظي».
+     */
     fun notify(ctx: Context, store: Store, m: SmsReceiver.In, thread: Long) {
         if (!canNotify(ctx) || MainActivity.viewing(thread)) return
         val nm = channel(ctx) ?: return
         val id = noteId(thread, m.sender)
+        val name = Names(ctx, store).of(m.sender) ?: m.sender
         val open = PendingIntent.getActivity(ctx, id,
             Intent(ctx, MainActivity::class.java).setAction(ACTION_CHAT).putExtra("thread", thread).putExtra("addr", m.sender)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = Notification.Builder(ctx, CH)
+        fun act(action: String) = Intent(ctx, SmsReplyReceiver::class.java).setAction(action)
+            .putExtra("thread", thread).putExtra("addr", m.sender).putExtra("sub", m.sub)
+        val read = PendingIntent.getBroadcast(ctx, id * 2, act(SmsReplyReceiver.READ), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val b = Notification.Builder(ctx, CH_MSGS)
             .setSmallIcon(R.drawable.ic_stat)
             .setColor(0xFF1E5AA8.toInt())
-            .setContentTitle(Names(ctx, store).of(m.sender) ?: m.sender)
-            .setContentText(m.body)
-            .setStyle(Notification.BigTextStyle().bigText(m.body))
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setWhen(System.currentTimeMillis()).setShowWhen(true)
             .setContentIntent(open)
             .setAutoCancel(true)
-            .build()
-        nm.notify(id, n)
+            .addAction(Notification.Action.Builder(null, "اتقرت", read).build())
+        if (canReply(m.sender)) {
+            // "send" from the notification needs a mutable intent (Android fills in the typed text)
+            val mut = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
+            val reply = PendingIntent.getBroadcast(ctx, id * 2 + 1, act(SmsReplyReceiver.REPLY), mut or PendingIntent.FLAG_UPDATE_CURRENT)
+            b.addAction(Notification.Action.Builder(null, "رد", reply)
+                .addRemoteInput(android.app.RemoteInput.Builder(SmsReplyReceiver.KEY).setLabel("اكتب رد").build()).build())
+        }
+        val msgs = unreadOf(ctx, thread, 6).ifEmpty { listOf(Pair(m.body, System.currentTimeMillis())) }
+        if (Build.VERSION.SDK_INT >= 28) {
+            val who = android.app.Person.Builder().setName(name).build()
+            val style = Notification.MessagingStyle(android.app.Person.Builder().setName("أنا").build())
+            for ((body, at) in msgs) style.addMessage(body, at, who)
+            b.setStyle(style).setContentTitle(name).setContentText(msgs.last().first)
+        } else {
+            b.setContentTitle(name).setContentText(m.body).setStyle(Notification.BigTextStyle().bigText(msgs.joinToString("\n") { it.first }))
+        }
+        nm.notify(id, b.build())
+    }
+
+    /** A number one can answer (not a sender name like "VF-Cash"). */
+    fun canReply(addr: String) = addr.count { it.isDigit() } >= 3 && addr.none { it.isLetter() }
+
+    /** Marks a conversation read (and its notification goes). */
+    fun markRead(ctx: Context, thread: Long, addr: String) {
+        if (thread > 0 && isDefault(ctx)) try {
+            ctx.contentResolver.update(Telephony.Sms.CONTENT_URI, ContentValues().apply { put(Telephony.Sms.READ, 1); put(Telephony.Sms.SEEN, 1) },
+                Telephony.Sms.THREAD_ID + "=? AND " + Telephony.Sms.READ + "=0", arrayOf(thread.toString()))
+        } catch (_: Exception) { }
+        cancelNote(ctx, thread, addr)
     }
 
     fun cancelNote(ctx: Context, thread: Long, sender: String) {
@@ -157,7 +221,7 @@ object SmsApp {
         val open = PendingIntent.getActivity(ctx, 49999, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val text = "وصلت رسالة فيها صورة أو فيديو (MMS)، و«محافظي» مبيفتحش النوع ده. لو مستنيها، رجّع تطبيق الرسايل القديم من الإعدادات ← التطبيقات الافتراضية."
-        nm.notify(49999, Notification.Builder(ctx, CH)
+        nm.notify(49999, Notification.Builder(ctx, CH_MSGS)
             .setSmallIcon(R.drawable.ic_stat)
             .setColor(0xFF1E5AA8.toInt())
             .setContentTitle("رسالة صور أو فيديو")
@@ -281,75 +345,100 @@ object SmsApp {
     // ---------- the messages screen ----------
 
     /** Conversations, newest first: name, last message, unread count. Blocking. */
-    /**
-     * Conversations, newest first, one per conversation and SIM line (the screen shows a tab for each line):
-     * name, last message on that line, unread count. A SIM that isn't in the phone any more counts as line 1.
-     */
-    fun threads(ctx: Context, store: Store): JSONObject {
-        val out = JSONArray()
-        val byKey = HashMap<String, JSONObject>()
-        var unread = 0
-        val names = Names(ctx, store)
-        val lines = subs(ctx)
-        val perLine = LinkedHashMap<Int, Int>().apply { for (x in lines) put(x, 0) }
-        fun lineOf(sub: Int) = if (sub in lines) sub else (lines.firstOrNull() ?: -1)
+    private class Row(val thread: Long, val addr: String, val body: String, val date: Long, val out: Boolean, val read: Boolean, val sub: Int)
+
+    /** The messages, newest first (no drafts). Blocking. */
+    private fun rows(ctx: Context, max: Int): List<Row> {
+        val out = ArrayList<Row>()
         try {
             ctx.contentResolver.query(Telephony.Sms.CONTENT_URI,
                 arrayOf(Telephony.Sms.THREAD_ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.READ, Telephony.Sms.SUBSCRIPTION_ID),
                 null, null, Telephony.Sms.DATE + " DESC")?.use { c ->
-                var rows = 0
-                while (c.moveToNext() && rows++ < 5000) {
+                while (c.moveToNext() && out.size < max) {
                     val type = c.getInt(4)
                     if (type == Telephony.Sms.MESSAGE_TYPE_DRAFT) continue
-                    val t = c.getLong(0)
-                    val line = lineOf(if (c.isNull(6)) -1 else c.getInt(6))
-                    val key = "$t/$line"
-                    var j = byKey[key]
-                    if (j == null) {
-                        if (byKey.size >= 300) continue
-                        val addr = c.getString(1) ?: ""
-                        j = JSONObject().put("id", t.toString()).put("addr", addr).put("name", names.of(addr) ?: JSONObject.NULL)
-                            .put("snippet", (c.getString(2) ?: "").replace('\n', ' ').take(140)).put("time", c.getLong(3))
-                            .put("out", type != Telephony.Sms.MESSAGE_TYPE_INBOX).put("unread", 0).put("sub", line)
-                        byKey[key] = j
-                        out.put(j)
-                    }
-                    if (type == Telephony.Sms.MESSAGE_TYPE_INBOX && c.getInt(5) == 0) {
-                        j.put("unread", j.getInt("unread") + 1); unread++
-                        perLine[line] = (perLine[line] ?: 0) + 1
-                    }
+                    out += Row(c.getLong(0), c.getString(1) ?: "", c.getString(2) ?: "", c.getLong(3), type != Telephony.Sms.MESSAGE_TYPE_INBOX,
+                        c.getInt(5) != 0, if (c.isNull(6)) -1 else c.getInt(6))
                 }
             }
         } catch (_: Exception) { }
-        val ls = JSONArray(); for ((sub, n) in perLine) ls.put(JSONObject().put("sub", sub).put("unread", n))
-        return JSONObject().put("threads", out).put("unread", unread).put("lines", ls)
+        return out
     }
 
     /**
-     * The last messages for the iPhone (the same tabs and conversations there, to read): newest first, as
-     * [thread, address, name, text, time, out (0/1), SIM line, read (0/1)], and unread per line. It goes up
+     * Which SIM line each message is on: its own when the phone wrote it; when not (or a SIM that's gone), the
+     * line its conversation's other messages are on, and only then line 1.
+     */
+    private fun lines(rows: List<Row>, lines: List<Int>): (Row) -> Int {
+        val byThread = HashMap<Long, Int>()
+        for (r in rows) if (r.sub in lines && !byThread.containsKey(r.thread)) byThread[r.thread] = r.sub
+        return { r -> if (r.sub in lines) r.sub else byThread[r.thread] ?: (lines.firstOrNull() ?: -1) }
+    }
+
+    private val CODE = Regex("otp|code|كود|رمز|verification|verify|تحقق|التحقق|تفعيل|passcode|password|كلمة المرور|كلمه المرور|الرقم السري المؤقت", RegexOption.IGNORE_CASE)
+    private val DIGITS = Regex("(?<!\\d)\\d{4,8}(?!\\d)")
+
+    /**
+     * The kind of a conversation, for the filters: w = wallet (Vodafone / Etisalat Cash), p = a person
+     * (a phone number), o = codes (OTP), s = services and offers (a sender name).
+     */
+    private fun kindOf(addr: String, msgs: List<Row>): String {
+        if (msgs.any { SmsSource.isWallet(it.addr, it.body) }) return "w"
+        if (canReply(addr)) return "p"
+        val last = msgs.firstOrNull()?.body ?: ""
+        val n = com.flashon.wallet.core.Parser.normalize(last)
+        return if (CODE.containsMatchIn(n) && DIGITS.containsMatchIn(n)) "o" else "s"
+    }
+
+    /**
+     * Conversations, newest first, one per conversation and SIM line (the screen shows a tab for each line):
+     * name, last message on that line, unread count, kind (for the filters).
+     */
+    fun threads(ctx: Context, store: Store): JSONObject {
+        val names = Names(ctx, store)
+        val ls = subs(ctx)
+        val all = rows(ctx, 5000)
+        val lineOf = lines(all, ls)
+        val groups = LinkedHashMap<String, MutableList<Row>>()
+        for (r in all) { val k = r.thread.toString() + "/" + lineOf(r); val g = groups[k]; if (g != null) g += r else if (groups.size < 300) groups[k] = mutableListOf(r) }
+        val perLine = LinkedHashMap<Int, Int>().apply { for (x in ls) put(x, 0) }
+        var unread = 0
+        val out = JSONArray()
+        for ((_, g) in groups) {
+            val top = g.first()
+            val line = lineOf(top)
+            val un = g.count { !it.out && !it.read }
+            unread += un; if (un > 0) perLine[line] = (perLine[line] ?: 0) + un
+            out.put(JSONObject().put("id", top.thread.toString()).put("addr", top.addr).put("name", names.of(top.addr) ?: JSONObject.NULL)
+                .put("snippet", top.body.replace('\n', ' ').take(140)).put("time", top.date).put("out", top.out)
+                .put("unread", un).put("sub", line).put("kind", kindOf(top.addr, g)))
+        }
+        val lj = JSONArray(); for ((sub, n) in perLine) lj.put(JSONObject().put("sub", sub).put("unread", n))
+        return JSONObject().put("threads", out).put("unread", unread).put("lines", lj)
+    }
+
+    /**
+     * The last messages for the iPhone (the same tabs, filters and conversations there): newest first, as
+     * [thread, address, name, text, time, out (0/1), SIM line, read (0/1), kind], and unread per line. It goes up
      * inside the account, locked with the link's password like everything else. Blocking.
      */
     fun export(ctx: Context, store: Store, max: Int = 400): JSONObject {
         val names = Names(ctx, store)
-        val lines = subs(ctx)
+        val ls = subs(ctx)
+        val all = rows(ctx, max)
+        val lineOf = lines(all, ls)
+        val kinds = HashMap<String, String>()
+        all.groupBy { it.thread.toString() + "/" + lineOf(it) }.forEach { (k, g) -> kinds[k] = kindOf(g.first().addr, g) }
         val msgs = JSONArray()
-        try {
-            ctx.contentResolver.query(Telephony.Sms.CONTENT_URI,
-                arrayOf(Telephony.Sms.THREAD_ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.READ, Telephony.Sms.SUBSCRIPTION_ID),
-                null, null, Telephony.Sms.DATE + " DESC")?.use { c ->
-                while (c.moveToNext() && msgs.length() < max) {
-                    val type = c.getInt(4)
-                    if (type == Telephony.Sms.MESSAGE_TYPE_DRAFT) continue
-                    val addr = c.getString(1) ?: ""
-                    val sub = if (c.isNull(6)) -1 else c.getInt(6)
-                    msgs.put(JSONArray().put(c.getLong(0)).put(addr).put(names.of(addr) ?: "").put((c.getString(2) ?: "").take(600))
-                        .put(c.getLong(3)).put(if (type == Telephony.Sms.MESSAGE_TYPE_INBOX) 0 else 1)
-                        .put(if (sub in lines) sub else (lines.firstOrNull() ?: -1)).put(c.getInt(5)))
-                }
-            }
-        } catch (_: Exception) { }
-        return JSONObject().put("lines", unreadByLine(ctx)).put("msgs", msgs)
+        val perLine = LinkedHashMap<Int, Int>().apply { for (x in ls) put(x, 0) }
+        for (r in all) {
+            val line = lineOf(r)
+            if (!r.out && !r.read) perLine[line] = (perLine[line] ?: 0) + 1
+            msgs.put(JSONArray().put(r.thread).put(r.addr).put(names.of(r.addr) ?: "").put(r.body.take(600)).put(r.date)
+                .put(if (r.out) 1 else 0).put(line).put(if (r.read) 1 else 0).put(kinds[r.thread.toString() + "/" + line] ?: "s"))
+        }
+        val lj = JSONArray(); for ((sub, n) in perLine) lj.put(JSONObject().put("sub", sub).put("unread", n))
+        return JSONObject().put("lines", lj).put("msgs", msgs)
     }
 
     /** Unread messages per SIM line, line 1 first (the messages card on the main screen). */
@@ -470,12 +559,11 @@ class SmsDeliverReceiver : BroadcastReceiver() {
                 // saved first, so nothing is lost whatever happens next
                 val threads = all.map { m -> try { SmsApp.saveIncoming(app, m) } catch (_: Exception) { -1L } }
                 val isWallet = all.map { SmsSource.isWallet(it.sender, it.body) }
-                for (i in all.indices) if (!isWallet[i]) try { SmsApp.notify(app, store, all[i], threads[i]) } catch (_: Exception) { }
+                // every SMS gets the messages notification (with sound, opens the conversation), the wallet ones too
+                for (i in all.indices) try { SmsApp.notify(app, store, all[i], threads[i]) } catch (_: Exception) { }
                 val wallet = all.filterIndexed { i, _ -> isWallet[i] }
                 // the iPhone, then this phone's money notification and the screens
                 if (wallet.isNotEmpty()) try { SmsSource.deliver(app, wallet.map { it.raw() }, "dlv", SmsReceiver.lagOf(wallet)) } catch (_: Exception) { }
-                // money notifications turned off: still a plain one, as the SMS app is the only one that notifies now
-                if (!store.txNotify) for (i in all.indices) if (isWallet[i]) try { SmsApp.notify(app, store, all[i], threads[i]) } catch (_: Exception) { }
                 MainActivity.smsChanged()
                 // the iPhone's messages tabs too (locked with the link's password like the rest)
                 if (Sync.isOn(store)) try { Sync.pushIfOn(app, store) } catch (_: Exception) { }
@@ -489,6 +577,33 @@ class SmsDeliverReceiver : BroadcastReceiver() {
         // 8 seconds, so the other apps' copy of the SMS isn't held up
         Thread { try { done.await(8, TimeUnit.SECONDS) } catch (_: Exception) { }; pending.finish() }.start()
         WatchService.start(app)
+    }
+}
+
+/** «رد» and «اتقرت» on a message notification. */
+class SmsReplyReceiver : BroadcastReceiver() {
+    companion object {
+        const val REPLY = "com.flashon.wallet.SMS_REPLY"
+        const val READ = "com.flashon.wallet.SMS_READ"
+        const val KEY = "reply"
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        val app = context.applicationContext
+        val thread = intent.getLongExtra("thread", -1)
+        val addr = intent.getStringExtra("addr") ?: return
+        if (intent.action == READ) { SmsApp.markRead(app, thread, addr); MainActivity.smsChanged(); return }
+        val text = android.app.RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY)?.toString()?.trim()
+        if (text.isNullOrEmpty()) return
+        val pending = goAsync()
+        Thread {
+            try {
+                SmsApp.send(app, addr, text, intent.getIntExtra("sub", -1))
+                SmsApp.markRead(app, thread, addr)
+                MainActivity.smsChanged()
+            } catch (_: Exception) {
+            } finally { pending.finish() }
+        }.start()
     }
 }
 

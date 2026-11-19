@@ -26,9 +26,10 @@ const sample = (balance) => ({ t: Date.now() - 120000, data: {
   txs: [{id: 'a1', w: 'vf', p: 'vf', type: 'in', kind: 'استلام', amount: 7000, fee: 0, balance, phone: '01011112222', name: 'تجربة', smsName: 'تجربة', time: Date.now() - 3600000, how: 'words'}],
   unknown: [], bodies: {a1: 'رسالة تجربة: تم استلام مبلغ 7000 جنيه'},
   sms: {lines: [{sub: 3, unread: 1}, {sub: 5, unread: 0}], msgs: [
-    [11, 'VF-Cash', '', 'تم استلام مبلغ 7000 جنيه من رقم 01011112222', Date.now() - 60000, 0, 3, 0],
-    [12, '+201099990000', 'أحمد', 'تمام وصلت', Date.now() - 120000, 1, 5, 1],
-    [11, 'VF-Cash', '', 'رسالة أقدم على خط 1', Date.now() - 3600000, 0, 3, 1]]},
+    [11, 'VF-Cash', '', 'تم استلام مبلغ 7000 جنيه من رقم 01011112222', Date.now() - 60000, 0, 3, 0, 'w'],
+    [12, '+201099990000', 'أحمد', 'تمام وصلت', Date.now() - 120000, 1, 5, 1, 'p'],
+    [13, 'CIB', '', 'Your OTP is 482913', Date.now() - 180000, 0, 3, 1, 'o'],
+    [11, 'VF-Cash', '', 'رسالة أقدم على خط 1', Date.now() - 3600000, 0, 3, 1, 'w']]},
   phoneLines: [{key: 's3', n: '1', wallets: ['vf'], own: ['01000000000']}, {key: 's5', n: '2', wallets: ['vf'], own: ['01000000001']}],
   xfer: {ready: true, remote: true, busy: false, smsApp: true, accounts: [{w: 'vfs3', label: 'فودافون كاش – خط 1', n: '1', own: '01000000000', can: balance, bal: balance}, {w: 'vfs5', label: 'فودافون كاش – خط 2', n: '2', own: '01000000001', can: 900, bal: 900}], list: []}
 }});
@@ -280,11 +281,28 @@ function wsOpen(port, path, tok) {
     await pg.click('[data-act=smsline][data-sub="5"]'); await pg.waitForTimeout(300);
     eq('تبويب خط 2 فيه محادثاته بس', (await pg.innerText('body')).includes('أحمد') && !(await pg.innerText('body')).includes('تم استلام مبلغ 7000 جنيه من رقم 01011112222'), true);
     await pg.click('[data-act=smstab][data-sub="3"]'); await pg.waitForTimeout(300);
+    eq('فلاتر الرسايل (محافظ / أكواد…)', (await pg.locator('[data-act=smskind]').allInnerTexts()).join('|').includes('محافظ'), true);
+    await pg.click('[data-act=smskind][data-k="o"]'); await pg.waitForTimeout(200);
+    eq('فلتر الأكواد بيعرض الأكواد بس', (await pg.locator('[data-act=chat]').count()) === 1 && (await pg.innerText('body')).includes('CIB'), true);
+    await pg.click('[data-act=smskind][data-k="all"]'); await pg.waitForTimeout(200);
+    eq('زرار الرجوع ظاهر فوق على الآيفون', await pg.isVisible('.back'), true);
     await pg.click('[data-act=chat] >> nth=0'); await pg.waitForTimeout(400);
     const chatTxt = await pg.innerText('body');
     eq('المحادثة بتتفتح برسايلها', chatTxt.includes('رسالة أقدم على خط 1') && chatTxt.includes('تم استلام مبلغ 7000'), true);
-    eq('… والرد من الأندرويد بس', chatTxt.includes('الرد من «محافظي» على الأندرويد') && await pg.locator('#smsText').count() === 0, true);
     await pg.screenshot({path: (process.env.SHOT || '/tmp/wallet') + '-sms.png'});
+    // رجوع زي الآيفون: رجوع المتصفح (السحب) بيرجع شاشة
+    await pg.goBack(); await pg.waitForTimeout(400);
+    eq('الرجوع بيرجع لقايمة الرسايل', (await pg.innerText('body')).includes('رسالة جديدة') && await pg.locator('[data-act=smstab]').count() === 2, true);
+    // إرسال رسالة من الآيفون: بتتقفل وتتبعت للأندرويد يبعتها من خطه
+    await pg.click('[data-act=smstab][data-sub="5"]'); await pg.waitForTimeout(200);
+    await pg.click('[data-act=chat] >> nth=0'); await pg.waitForTimeout(400);
+    await pg.fill('#smsText', 'تمام شكراً'); await pg.click('[data-act=send]'); await pg.waitForTimeout(1200);
+    const ls = await (await fetch(C, {headers: phone()})).json();
+    const sc = ls.cmds.length && openCmd(L.key, Buffer.from(ls.cmds[ls.cmds.length - 1].b, 'base64url'));
+    eq('الرسالة اتقفلت واتبعتت للأندرويد', sc && [sc.k, sc.to, sc.body, sc.sub].join('|'), 'sms|+201099990000|تمام شكراً|5');
+    eq('… وظاهرة «بيتبعت» في المحادثة', (await pg.innerText('body')).includes('تمام شكراً'), true);
+    await fetch(C + '?upto=999', {method: 'DELETE', headers: phone()});
+    await pg.evaluate(() => document.getElementById('sheetBg').click()); await pg.waitForTimeout(200);
     await pg.click('[data-act=back]'); await pg.waitForTimeout(200); await pg.click('[data-act=back]'); await pg.waitForTimeout(300);
     // تحديث من الموبايل بيوصل لوحده
     await fetch(S, {method: 'PUT', headers: phone(), body: snap(L.key, 9999)});
