@@ -90,8 +90,9 @@ object Ussd {
     /** The phone or the network failed to carry the code ("حدثت مشكلة في الاتصال أو رمز MMI غير صالح"): Vodafone never saw it. */
     fun glitch(text: String): Boolean = GLITCH.containsMatchIn(clean(text))
 
-    /** Does this text ask for the PIN (the next thing to type is the PIN). */
-    fun asksPin(text: String): Boolean = PIN.containsMatchIn(clean(text))
+    // No transfer with no screen: Android's TelephonyManager.sendUssdRequest gives one answer per code, and
+    // Vodafone takes no answer inside the code itself ("*9*7*N*A*0#" and "*9*7*N*A*PIN#" both came back
+    // "عفوا الرقم الذي ادخالته غير صحيح لتحويل …"), so the PIN is only ever typed in Vodafone's own screen.
 
     /** Does this text ask something (the PIN, or to confirm): a question, even when it comes as a notification. */
     fun asks(text: String): Boolean { val t = clean(text); return PIN.containsMatchIn(t) || CONFIRM.containsMatchIn(t) }

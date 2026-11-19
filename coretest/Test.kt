@@ -268,6 +268,11 @@ fun main() {
     check("real MMI error = a hiccup (try again)", Ussd.glitch(mmi) && Ussd.glitch("Connection problem or invalid MMI code."))
     check("a wrong PIN isn't a hiccup", !Ussd.glitch("عفواً، الرقم السري غير صحيح") && !Ussd.glitch("رصيدك غير كافٍ"))
 
+    // ---- Vodafone's real answer to an answer put inside the code ("*9*7*N*A*0#" and "*9*7*N*A*PIN#") ----
+    val badAnswer = "عفوا الرقم الذي ادخالته غير صحيح لتحويل 10000 ج بالإضافة ل15 ج رسوم لرقم 0:مزيد"
+    check("real 'incorrect' answer = failed", Ussd.step(badAnswer, false, me, true, false) == Ussd.Step.FAIL, Ussd.step(badAnswer, false, me, true, false))
+    check("real 'incorrect' answer isn't done or a PIN question", Ussd.step(badAnswer, true, me, true, false).let { it != Ussd.Step.OK && it != Ussd.Step.PIN && it != Ussd.Step.CONFIRM })
+
     // ---- a question, even when it comes as a notification ----
     check("asks: PIN", Ussd.asks("لتأكيد تحويل 500 جنيه الى 01012345678 ادخل الرقم السري"))
     check("asks: confirm", Ussd.asks("سيتم تحويل 500 جنيه. للتأكيد اضغط 1"))

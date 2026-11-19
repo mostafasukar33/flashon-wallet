@@ -607,6 +607,14 @@ class MainActivity : Activity() {
             return true
         }
 
+        /** The phone's own lock PIN or password, typed on the lock screen for a transfer from the iPhone ("" = remove). "" = saved, else what's wrong. */
+        @JavascriptInterface
+        fun setLockPin(pin: String): String {
+            val why = Unlock.save(this@MainActivity, pin)
+            reloadUi()
+            return why ?: ""
+        }
+
         /** A transfer from this phone's screen: {to, a, pin, w}. The answer comes in App.onXferSent. */
         @JavascriptInterface
         fun sendXfer(json: String) {

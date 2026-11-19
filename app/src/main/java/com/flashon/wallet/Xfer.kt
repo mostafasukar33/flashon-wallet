@@ -54,6 +54,8 @@ object Xfer {
     private const val CH = "xfer"
     private const val NOTE = 7100
     private const val TIMEOUT = 75_000L
+    /** How long a transfer waits for a phone locked with a password to be opened, before anything is dialed. */
+    private const val LOCK_WAIT = 5 * 60_000L
     private const val KEEP = 20
     private val main = Handler(Looper.getMainLooper())
     private val rnd = SecureRandom()
@@ -64,6 +66,11 @@ object Xfer {
         @Volatile var pinSent = false
         @Volatile var confirmSent = false
         @Volatile var dialed = false
+        @Volatile var timed = false
+        /** Waiting for the phone locked with a password to be opened before dialing. */
+        @Volatile var waitOpen = false
+        /** The saved lock PIN was typed on the lock screen for it (once per transfer). */
+        @Volatile var unlockTried = false
         @Volatile var seen = false
         @Volatile var done = false
         @Volatile var last = ""
@@ -124,7 +131,9 @@ object Xfer {
         val acc = accOn(ctx)
         return JSONObject().put("perm", perm).put("phone", phonePerm(ctx)).put("acc", acc).put("ready", perm && acc)
             .put("remote", remoteOn(store)).put("code", template(store)).put("def", Ussd.DEFAULT_VF)
-            .put("busy", j != null && !j.done).put("line", Remote.state).put("smsApp", SmsApp.isDefault(ctx)).put("secure", lockedWithPassword(ctx)).put("accounts", accs).put("list", history(store))
+            .put("lk", Unlock.state(ctx)).put("sec", Unlock.secure(ctx))
+            .put("hold", Unlock.secure(ctx) && !Unlock.has(ctx))   // for the iPhone: a locked Android waits to be opened
+            .put("busy", j != null && !j.done).put("line", Remote.state).put("smsApp", SmsApp.isDefault(ctx)).put("accounts", accs).put("list", history(store))
     }
 
     private fun vfAccounts(led: com.flashon.wallet.core.Ledger) =
@@ -211,7 +220,7 @@ object Xfer {
         synchronized(this) {
             val cur = job
             if (cur != null && !cur.done) {
-                if (System.currentTimeMillis() - cur.startedAt < TIMEOUT + 10_000L) {
+                if (System.currentTimeMillis() - cur.startedAt < LOCK_WAIT + TIMEOUT + 4 * 60_000L + 10_000L) {
                     val w = "فيه تحويل شغال دلوقتي، استنى يخلص"
                     finishEarly(app, store, id, base, w); return w
                 }
@@ -224,31 +233,85 @@ object Xfer {
         j.log(lockState(app))
         note(app, "⏳ بيحوّل ${Notifier.fmt(amount.toDouble())} ج لـ $to", if (from == "iphone") "طلب من الآيفون" else "من «محافظي»", true)
         refresh(app)
-        withScreen(app, j)
+        main.post { if (job === j && !j.done) withScreen(app, j) }
         return null
     }
 
-    /** The usual way: our screen (wakes the phone, covers the lock), it dials, and [onScreen] answers Vodafone's screens. */
+    /**
+     * Our screen (wakes the phone, covers the lock), it dials, and [onScreen] answers Vodafone's screens.
+     * Vodafone's PIN question only works on its own screen: an answer put in the code itself ("*9*7*N*A*PIN#",
+     * sent with no screen by TelephonyManager.sendUssdRequest) came back "عفوا الرقم الذي ادخالته غير صحيح …", for
+     * a "0" and for the PIN alike. And on a phone locked with a password (Infinix) Vodafone's screen stays behind
+     * the lock. So then nothing is dialed until the phone is opened: our screen asks for it (fingerprint or
+     * password), and the code goes out the moment it's open; [LOCK_WAIT] with no opening = nothing was sent.
+     */
     private fun withScreen(app: Context, j: Job) {
-        j.log("بيطلب الكود بالشاشة")
         UssdService.watch(true)
         try {
             app.startActivity(Intent(app, XferActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS))
         } catch (_: Exception) { }
+        if (secureLocked(app)) {
+            j.waitOpen = true
+            j.log("مستني الموبايل يتفتح علشان يطلب الكود (فودافون بتسأل عن الرقم السري في شاشتها بس)")
+            val auto = Unlock.has(app)
+            val msg = if (auto) "بيفتح قفل شاشة الأندرويد لوحده، ولسه مفيش حاجة اتبعتت لفودافون" else "مستني قفل شاشة الأندرويد يتفتح (بصمة أو باسورد)، ولسه مفيش حاجة اتبعتت لفودافون"
+            Thread { record(Store(app), j.id, JSONObject().put("msg", msg)); refresh(app) }.start()
+            if (j.from == "iphone" && !auto) tellIphone(app, Store(app), "⏳ التحويل مستني تفتح الأندرويد", "الأندرويد مقفول بباسورد. أول ما يتفتح التحويل هيكمل لوحده، أو احفظ رقم القفل في «محافظي» علشان يفتحه لوحده.", j.id)
+            waitOpen(app, j, System.currentTimeMillis())
+            // our screen asks Android for the lock screen first, then the saved lock PIN is typed on it
+            if (auto) main.postDelayed({ autoUnlock(app, j) }, 1800)
+            return
+        }
+        j.log("بيطلب الكود بالشاشة")
         main.postDelayed({ if (job === j && !j.dialed) dial(app, j) }, 2500)
-        // locked with a password and Vodafone's screen hasn't shown: tell the iPhone the transfer waits for the phone to be opened
-        main.postDelayed({
-            if (job === j && !j.done && !j.seen && j.from == "iphone" && try { app.getSystemService(KeyguardManager::class.java).let { it.isKeyguardLocked && it.isDeviceSecure } } catch (_: Exception) { false })
-                tellIphone(app, Store(app), "⏳ التحويل مستني تفتح الأندرويد", "الأندرويد مقفول بباسورد، والموبايل مبيسمحش لشاشة فودافون تظهر فوق القفل. أول ما يتفتح التحويل هيكمل، أو خلّي قفله «سحب» من غير باسورد.", j.id)
-        }, 20_000L)
-        main.postDelayed({ timeout(app, j, first = true) }, TIMEOUT)
     }
 
+    /** Locked with a password, fingerprint or pattern: Vodafone's screen won't show until it's opened. */
+    fun secureLocked(ctx: Context): Boolean = try {
+        ctx.getSystemService(KeyguardManager::class.java).let { it != null && it.isKeyguardLocked && it.isDeviceSecure }
+    } catch (_: Exception) { false }
 
+    /** Checks every second and a half if the phone was opened: then dials; after [LOCK_WAIT] it ends with nothing sent. */
+    private fun waitOpen(app: Context, j: Job, since: Long) {
+        if (job !== j || j.done || j.dialed) return
+        if (!secureLocked(app)) { opened(app, j); return }
+        if (System.currentTimeMillis() - since > LOCK_WAIT) {
+            end(app, j, "fail", "الأندرويد فضل مقفول ومحدش فتحه، فالكود مااتطلبش ومفيش حاجة اتبعتت لفودافون. افتح الأندرويد وجرّب تاني")
+            return
+        }
+        main.postDelayed({ waitOpen(app, j, since) }, 1500)
+    }
 
-    /** The phone has a screen lock with a password, PIN, pattern or fingerprint (Vodafone's screen can't show over it). */
-    fun lockedWithPassword(ctx: Context): Boolean = try { ctx.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true } catch (_: Exception) { false }
+    /** Types the saved lock PIN on the lock screen (once); if the phone is still locked after it, the PIN is wiped. */
+    private fun autoUnlock(app: Context, j: Job) {
+        if (job !== j || j.done || !j.waitOpen || j.unlockTried) return
+        j.unlockTried = true
+        j.log("بيكتب رقم قفل الشاشة لوحده")
+        Unlock.type(app) { r ->
+            when (r) {
+                "typed" -> main.postDelayed({
+                    if (job === j && !j.done && j.waitOpen && secureLocked(app)) {
+                        Unlock.failed(app)
+                        j.log("كتب رقم قفل الشاشة والموبايل فضل مقفول، فاتمسح ومش هيتكتب تاني لحد ما تحفظه من جديد")
+                        Thread { record(Store(app), j.id, JSONObject().put("msg", "رقم قفل شاشة الأندرويد المحفوظ طلع غلط، افتحه بإيدك")); refresh(app) }.start()
+                        XferActivity.update()
+                    }
+                }, 6000)
+                "nokeys" -> j.log("ملقاش أزرار شاشة القفل فمكتبش حاجة، افتحه بإيدك")
+                else -> j.log("«التحويل التلقائي» مش شغال فمقدرش يفتح القفل، افتحه بإيدك")
+            }
+        }
+    }
+
+    /** The phone was opened (from [waitOpen], or right away from our screen's unlock prompt): dial now. */
+    fun opened(ctx: Context, j: Job) {
+        if (job !== j || j.done || j.dialed || !j.waitOpen) return
+        j.waitOpen = false
+        j.log("الموبايل اتفتح، بيطلب الكود بالشاشة")
+        XferActivity.update()
+        main.postDelayed({ if (job === j && !j.dialed) dial(ctx.applicationContext, j) }, 700)
+    }
 
     /** "مقفول بباسورد" / "مقفول من غير باسورد" / "مفتوح": for the step-by-step list. */
     private fun lockState(ctx: Context): String = try {
@@ -288,6 +351,7 @@ object Xfer {
     fun dial(ctx: Context, j: Job) {
         if (j.dialed || j.done) return
         j.dialed = true
+        if (!j.timed) { j.timed = true; val app = ctx.applicationContext; main.postDelayed({ timeout(app, j, first = true) }, TIMEOUT) }
         try {
             val tm = ctx.getSystemService(TelecomManager::class.java)
             val extras = Bundle()
@@ -685,7 +749,11 @@ class XferActivity : Activity() {
     companion object {
         @Volatile private var cur: WeakReference<XferActivity>? = null
         fun close() { cur?.get()?.let { a -> a.runOnUiThread { a.finish() } } }
+        /** The phone was opened: the screen says it's transferring now. */
+        fun update() { cur?.get()?.let { a -> a.runOnUiThread { a.show() } } }
     }
+
+    private var text: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -693,22 +761,45 @@ class XferActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
         else @Suppress("DEPRECATION") window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val kg = getSystemService(KeyguardManager::class.java)
-        // a lock screen with no password goes away by itself; a locked one stays, covered by this screen
-        if (kg != null && kg.isKeyguardLocked && !kg.isDeviceSecure) try { kg.requestDismissKeyguard(this, null) } catch (_: Exception) { }
         val j = Xfer.job
-        setContentView(TextView(this).apply {
-            text = if (j != null) "⏳\n«محافظي» بيحوّل ${Notifier.fmt(j.amount.toDouble())} ج لـ ${j.to}\nاستنى ثواني لحد ما فودافون ترد\n\nالشاشة دي بتقفل لوحدها لما التحويل يخلص" else ""
+        text = TextView(this).apply {
             textSize = 18f
             setTextColor(0xFFE6E8EB.toInt())
             setBackgroundColor(0xFF16181B.toInt())
             setPadding(48, 48, 48, 48)
             gravity = Gravity.CENTER
             setLineSpacing(0f, 1.35f)
-        })
+            // a tap asks for the unlock again (if the fingerprint prompt was closed)
+            setOnClickListener { unlock() }
+        }
+        setContentView(text)
         if (j == null || j.done) { finish(); return }
-        Handler(Looper.getMainLooper()).postDelayed({ Xfer.job?.let { if (it === j) Xfer.dial(this, it) } }, 600)
-        Handler(Looper.getMainLooper()).postDelayed({ if (!isFinishing) finish() }, 6 * 60_000L)
+        show()
+        // the lock goes away by itself with no password; with one, Android asks for it (fingerprint or password)
+        // right away, and Xfer dials the moment it's open (Vodafone's screen doesn't show over a locked phone)
+        unlock()
+        if (!j.waitOpen) Handler(Looper.getMainLooper()).postDelayed({ Xfer.job?.let { if (it === j) Xfer.dial(this, it) } }, 600)
+        Handler(Looper.getMainLooper()).postDelayed({ if (!isFinishing) finish() }, 12 * 60_000L)
+    }
+
+    private fun unlock() {
+        val kg = getSystemService(KeyguardManager::class.java) ?: return
+        if (!kg.isKeyguardLocked || Build.VERSION.SDK_INT < 26) return
+        try {
+            kg.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
+                override fun onDismissSucceeded() { Xfer.job?.let { if (!it.done) Xfer.opened(this@XferActivity, it) } }
+            })
+        } catch (_: Exception) { }
+    }
+
+    fun show() {
+        val j = Xfer.job ?: return
+        val amt = Notifier.fmt(j.amount.toDouble())
+        text?.text = if (j.waitOpen && Unlock.has(this))
+            "🔓\n«محافظي» بيفتح قفل الشاشة لوحده\nعلشان يحوّل $amt ج لـ ${j.to}\n\nلسه مفيش حاجة اتبعتت لفودافون"
+        else if (j.waitOpen)
+            "🔒\nافتح الموبايل (بصمة أو باسورد)\nوالتحويل هيكمل لوحده\n\n«محافظي» هيحوّل $amt ج لـ ${j.to}\nفودافون بتسأل عن الرقم السري في شاشتها، وشاشتها مبتظهرش والموبايل مقفول\n\nلسه مفيش حاجة اتبعتت لفودافون"
+        else "⏳\n«محافظي» بيحوّل $amt ج لـ ${j.to}\nاستنى ثواني لحد ما فودافون ترد\n\nالشاشة دي بتقفل لوحدها لما التحويل يخلص"
     }
 
     override fun onDestroy() {
