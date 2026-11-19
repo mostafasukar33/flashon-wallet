@@ -90,7 +90,7 @@
             android:taskAffinity="com.flashon.wallet.xfer"
             android:launchMode="singleInstance"
             android:noHistory="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
 
         <receiver
             android:name=".Beat"

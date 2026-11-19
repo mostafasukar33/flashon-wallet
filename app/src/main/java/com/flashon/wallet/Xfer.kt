@@ -221,6 +221,7 @@ object Xfer {
             job = j
         }
         record(store, id, base.put("st", "run").put("msg", ""))
+        j.log(lockState(app))
         note(app, "⏳ بيحوّل ${Notifier.fmt(amount.toDouble())} ج لـ $to", if (from == "iphone") "طلب من الآيفون" else "من «محافظي»", true)
         refresh(app)
         UssdService.watch(true)
@@ -231,13 +232,35 @@ object Xfer {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS))
         } catch (_: Exception) { }
         main.postDelayed({ if (job === j && !j.dialed) dial(app, j) }, 2500)
-        main.postDelayed({
-            if (job === j && !j.done) {
-                UssdService.current()?.let { tap(it, false) }   // a Vodafone screen still open: close it, nothing gets typed after this
-                end(app, j, "fail", if (j.seen) "فودافون مردتش في الوقت" else "الكود مااتطلبش: لو الموبايل مقفول بباسورد افتحه، أو جرّب تاني")
-            }
-        }, TIMEOUT)
+        main.postDelayed({ timeout(app, j, first = true) }, TIMEOUT)
         return null
+    }
+
+    /** "مقفول بباسورد" / "مقفول من غير باسورد" / "مفتوح": for the step-by-step list. */
+    private fun lockState(ctx: Context): String = try {
+        val kg = ctx.getSystemService(KeyguardManager::class.java)
+        "الموبايل " + when { kg == null || !kg.isKeyguardLocked -> "مفتوح"; kg.isDeviceSecure -> "مقفول بباسورد أو بصمة"; else -> "مقفول من غير باسورد" }
+    } catch (_: Exception) { "" }
+
+    /**
+     * No answer in time. When Vodafone's screen never showed and the phone is locked with a password, it waits a
+     * few minutes more (the screen may be held behind the lock, and shows when the phone is opened); else it ends.
+     */
+    private fun timeout(app: Context, j: Job, first: Boolean) {
+        if (job !== j || j.done) return
+        val locked = try { app.getSystemService(KeyguardManager::class.java).let { it.isKeyguardLocked && it.isDeviceSecure } } catch (_: Exception) { false }
+        if (first && !j.seen && locked) {
+            j.log("شاشة فودافون مظهرتش والموبايل مقفول بباسورد: مستني يتفتح")
+            Thread { record(Store(app), j.id, JSONObject().put("msg", "مستني قفل شاشة الأندرويد يتفتح")); refresh(app) }.start()
+            main.postDelayed({ timeout(app, j, first = false) }, 4 * 60_000L)
+            return
+        }
+        UssdService.current()?.let { tap(it, false) }   // a Vodafone screen still open: close it, nothing gets typed after this
+        end(app, j, "fail", when {
+            j.seen -> "فودافون مردتش في الوقت"
+            locked -> "شاشة فودافون مبتظهرش والموبايل مقفول بباسورد. شيل قفل الشاشة من الأندرويد أو افتحه وجرّب تاني"
+            else -> "الكود مااتطلبش، جرّب تاني"
+        })
     }
 
     private fun finishEarly(app: Context, store: Store, id: String, base: JSONObject, why: String) {
@@ -639,9 +662,10 @@ class UssdService : AccessibilityService() {
 }
 
 /**
- * A see-through screen for the few seconds of a transfer: it wakes the phone and shows over the lock
- * screen, so Vodafone's answer shows on top of it (a closed app can't open the phone's USSD screen
- * otherwise), then dials. It closes itself when the transfer is over.
+ * A full, solid screen for the few seconds of a transfer: it wakes the phone and covers the lock screen, so
+ * Vodafone's screen shows on top of it, then dials. It has to be solid: Android lets a screen hide the lock
+ * only when it fills the display (the first version was see-through, the lock stayed on top of Vodafone's
+ * screen, and the transfer waited until the phone was opened). It closes itself when the transfer is over.
  */
 class XferActivity : Activity() {
     companion object {
@@ -656,23 +680,21 @@ class XferActivity : Activity() {
         else @Suppress("DEPRECATION") window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val kg = getSystemService(KeyguardManager::class.java)
-        // a lock screen with no password goes away by itself; a locked one stays (the USSD screen still shows over this)
+        // a lock screen with no password goes away by itself; a locked one stays, covered by this screen
         if (kg != null && kg.isKeyguardLocked && !kg.isDeviceSecure) try { kg.requestDismissKeyguard(this, null) } catch (_: Exception) { }
         val j = Xfer.job
         setContentView(TextView(this).apply {
-            text = if (j != null) "⏳ «محافظي» بيحوّل ${Notifier.fmt(j.amount.toDouble())} ج لـ ${j.to}\nاستنى ثواني لحد ما فودافون ترد" else ""
-            textSize = 16f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xCC16181B.toInt())
-            setPadding(48, 32, 48, 32)
+            text = if (j != null) "⏳\n«محافظي» بيحوّل ${Notifier.fmt(j.amount.toDouble())} ج لـ ${j.to}\nاستنى ثواني لحد ما فودافون ترد\n\nالشاشة دي بتقفل لوحدها لما التحويل يخلص" else ""
+            textSize = 18f
+            setTextColor(0xFFE6E8EB.toInt())
+            setBackgroundColor(0xFF16181B.toInt())
+            setPadding(48, 48, 48, 48)
             gravity = Gravity.CENTER
+            setLineSpacing(0f, 1.35f)
         })
-        window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT)
-        window.setGravity(Gravity.TOP)
-        window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
         if (j == null || j.done) { finish(); return }
-        Handler(Looper.getMainLooper()).postDelayed({ Xfer.job?.let { if (it === j) Xfer.dial(this, it) } }, 400)
-        Handler(Looper.getMainLooper()).postDelayed({ if (!isFinishing) finish() }, 90_000L)
+        Handler(Looper.getMainLooper()).postDelayed({ Xfer.job?.let { if (it === j) Xfer.dial(this, it) } }, 600)
+        Handler(Looper.getMainLooper()).postDelayed({ if (!isFinishing) finish() }, 6 * 60_000L)
     }
 
     override fun onDestroy() {

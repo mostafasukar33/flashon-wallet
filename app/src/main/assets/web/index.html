@@ -134,6 +134,7 @@ details.old summary{font-weight:700;font-size:15px;min-height:32px;cursor:pointe
 .rcpt .amt{font-size:30px;font-weight:700;text-align:center;padding:4px 0 8px;border-bottom:1px dashed var(--line2)}
 .rcpt .row{font-size:14px}
 .rcpt .row span:first-child{color:var(--mute)}
+.pinbox{-webkit-text-security:disc;text-security:disc;letter-spacing:4px}
 .ltabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:8px}
 .ltab{position:relative;border:1px solid var(--line2);background:#fff;border-radius:14px;padding:12px 14px;min-height:72px;display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:right;width:100%}
 .ltab b{font-size:17px}
@@ -816,10 +817,10 @@ function xferSheet(){
     openSheet(h); return;
   }
   h+=xferPick(accs, acc);
-  h+='<div class="field"><label for="xf_to">الرقم</label><input type="tel" id="xf_to" class="num" dir="ltr" style="text-align:left" placeholder="01xxxxxxxxx" autocomplete="off" value="'+esc(f.to||'')+'"></div>'+
+  h+='<div class="field"><label for="xf_to">الرقم</label><input type="tel" id="xf_to" class="num" name="vf-to" dir="ltr" style="text-align:left" placeholder="01xxxxxxxxx" autocomplete="off" data-lpignore="true" value="'+esc(f.to||'')+'"></div>'+
     '<div class="field"><label for="xf_a">المبلغ (جنيه)</label><input type="number" id="xf_a" class="num" inputmode="numeric" style="text-align:right" value="'+esc(f.a||'')+'"></div>'+
     (acc.can!=null?'<span class="xs mute">تقدر تحوّل دلوقتي <span class="num">'+fmt(acc.can)+'</span> ج من '+esc(acc.label)+'</span>':'')+
-    '<div class="field"><label for="xf_pin">الرقم السري بتاع فودافون كاش</label><input type="password" id="xf_pin" inputmode="numeric" autocomplete="off" dir="ltr" style="text-align:left;border:1px solid var(--line2);border-radius:10px;min-height:48px;padding:0 12px;font-size:17px;background:#fff" value="'+esc(f.pin||'')+'"></div>'+
+    '<div class="field"><label for="xf_pin">الرقم السري بتاع فودافون كاش</label><input type="text" id="xf_pin" class="pinbox" name="vf-wallet-code" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" dir="ltr" style="text-align:left;border:1px solid var(--line2);border-radius:10px;min-height:48px;padding:0 12px;font-size:17px;background:#fff" value="'+esc(f.pin||'')+'"></div>'+
     '<span class="xs mute" style="line-height:1.6">الرقم السري بيتكتب في شاشة فودافون على الأندرويد مرة واحدة ومبيتحفظش في أي حتة'+(VIEW?'، وبيتقفل بباسورد اللينك قبل ما يطلع من الآيفون':'')+'.</span>'+
     '<button class="btn main" data-act="xnext">كمّل</button>'+
     (!VIEW&&!x.ready?'<button class="btn ghost" data-act="xdial">أو اطلب الكود واكتب الرقم السري بنفسك</button>':'');
@@ -1118,7 +1119,8 @@ document.addEventListener('click', function(e){
     case 'sms': closeSheet(); SMS.threads=null; go('sms'); B.loadThreads(); break;
     case 'smsline': S.smsSub=+el.dataset.sub; SMS.threads=null; go('sms'); B.loadThreads(); break;
     case 'smstab': S.smsSub=+el.dataset.sub; S.sendSub=S.smsSub; render(); break;
-    case 'chat': SMS.chat=null; S.draft=''; S.sendSub=(S.screen==='sms' && smsLines().length>1 && S.smsSub!=null)?S.smsSub:null;   // reply on the line of the tab it was opened from go('chat',{chatId:el.dataset.id, chatAddr:el.dataset.a}); B.loadChat(el.dataset.id, el.dataset.a); break;
+    // a conversation opened from a line's tab replies on that line
+    case 'chat': SMS.chat=null; S.draft=''; S.sendSub=(S.screen==='sms' && smsLines().length>1 && S.smsSub!=null)?S.smsSub:null; go('chat',{chatId:el.dataset.id, chatAddr:el.dataset.a}); B.loadChat(el.dataset.id, el.dataset.a); break;
     case 'newchat': SMS.chat=null; S.draft=''; if (S.smsSub!=null) S.sendSub=S.smsSub; go('chat',{chatId:'', chatAddr:''}); setTimeout(function(){var i=document.getElementById('smsTo'); if(i) i.focus();},200); break;
     case 'send': sendSms(); break;
     case 'sim': S.sendSub=+el.dataset.sub; var cp=document.getElementById('compose'), o=cp&&cp.querySelector('.chips'); if (o) o.outerHTML=simRow(); break;
