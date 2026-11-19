@@ -85,6 +85,9 @@ class MainActivity : Activity() {
     private var askedNotif = false
     /** Android 13+: without this permission the app shows nothing, not even the "محافظي شغال" line. Asked once per opening. */
     private fun askNotifications() {
+        if (!askedNotif && SmsSource.hasPermission(this) && checkSelfPermission(Manifest.permission.RECEIVE_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            askedNotif = true; requestPermissions(arrayOf(Manifest.permission.RECEIVE_SMS), REQ_NOTE); return
+        }
         if (askedNotif || Build.VERSION.SDK_INT < 33 || !SmsSource.hasPermission(this)) return
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) return
         askedNotif = true

@@ -38,6 +38,10 @@ class WatchService : Service() {
         private const val NOTE_ID = 7001
         @Volatile var running = false
             private set
+        @Volatile var bornAt = 0L   // when this process started the watcher (0 = not in this process)
+        /** Last time each way caught something (any SMS), for the server log only. */
+        @Volatile var seen = HashMap<String, Long>()
+        fun saw(way: String) { seen = HashMap(seen).also { it[way] = System.currentTimeMillis() } }
 
         /** Starts the watcher if SMS reading is allowed. Safe to call any time, from anywhere. */
         fun start(ctx: Context) {
@@ -62,7 +66,9 @@ class WatchService : Service() {
             else startForeground(NOTE_ID, note())
         } catch (_: Exception) { stopSelf(); return START_NOT_STICKY }
         running = true
+        if (bornAt == 0L) bornAt = System.currentTimeMillis()
         if (thread == null) watch()
+        TickReceiver.next(this)
         handler?.post(scan)   // anything that came while the watcher was stopped
         return START_STICKY
     }
@@ -96,6 +102,7 @@ class WatchService : Service() {
         // 1) the SMS itself, the moment it lands (works while this service lives, on any phone)
         val r = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
+                saw("watch")
                 val list = SmsReceiver.parse(context, intent)
                 if (list.isEmpty()) return
                 // goAsync keeps the phone awake until the send is done (a plain post let it fall asleep first)
@@ -112,6 +119,7 @@ class WatchService : Service() {
         // 2) the inbox: catches it too if the SMS broadcast never came (a second later, once it is saved)
         val o = object : ContentObserver(h) {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
+                saw("box")
                 SmsSource.awake(this@WatchService, "box", 10_000L)   // stay awake for the short wait below
                 h.removeCallbacks(scan); h.postDelayed(scan, 1500)
             }
@@ -165,4 +173,35 @@ class WatchJob : JobService() {
     }
 
     override fun onStopJob(params: JobParameters): Boolean = true
+}
+
+/**
+ * Every minute, an exact alarm that wakes the phone even in deep sleep: reads the last wallet messages
+ * and sends what's new. On phones that hold back the SMS broadcast from apps in the background
+ * (Infinix on Android 16 did: nothing came until the app was opened), this is what still gets it out.
+ */
+class TickReceiver : BroadcastReceiver() {
+    companion object {
+        private const val EVERY = 60_000L
+        fun next(ctx: Context) {
+            val app = ctx.applicationContext
+            val am = app.getSystemService(AlarmManager::class.java) ?: return
+            val pi = PendingIntent.getBroadcast(app, 3, Intent(app, TickReceiver::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val at = System.currentTimeMillis() + EVERY
+            try {
+                if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+                else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+            } catch (_: Exception) { try { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi) } catch (_: Exception) { } }
+        }
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        WatchService.saw("tick")
+        next(context)
+        val pending = goAsync()
+        Thread {
+            try { SmsSource.catchUp(context, "tick") } catch (_: Exception) { } finally { pending.finish() }
+        }.start()
+        if (!WatchService.running) WatchService.start(context)
+    }
 }

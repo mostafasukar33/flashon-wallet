@@ -118,6 +118,10 @@ object Sync {
             ";bat=" + (if (pm.isIgnoringBatteryOptimizations(ctx.packageName)) 1 else 0) +
             ";watch=" + (if (WatchService.running) 1 else 0) +
             ";notif=" + (if (nm.areNotificationsEnabled()) 1 else 0) +
+            ";rsms=" + (if (ctx.checkSelfPermission(android.Manifest.permission.RECEIVE_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED) 1 else 0) +
+            ";exact=" + (if (android.os.Build.VERSION.SDK_INT < 31 || ctx.getSystemService(android.app.AlarmManager::class.java).canScheduleExactAlarms()) 1 else 0) +
+            ";age=" + (if (WatchService.bornAt > 0) (System.currentTimeMillis() - WatchService.bornAt) / 1000 else -1) +
+            ";seen=" + WatchService.seen.entries.joinToString(",") { it.key + ":" + (System.currentTimeMillis() - it.value) / 1000 } +
             ";v=" + try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode } catch (_: Exception) { 0 }
     }
 

@@ -130,6 +130,7 @@ object SmsSource {
 /** Catches a new SMS the moment it arrives, even when the app is closed. */
 class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        WatchService.saw("rcv")
         val list = parse(context, intent)
         if (list.isEmpty()) return
         val pending = goAsync()
