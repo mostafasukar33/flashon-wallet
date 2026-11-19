@@ -38,8 +38,6 @@ import com.flashon.wallet.core.Wallet
 import org.json.JSONArray
 import org.json.JSONObject
 import java.lang.ref.WeakReference
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.security.SecureRandom
 
 /**
@@ -56,7 +54,8 @@ object Xfer {
     private const val CH = "xfer"
     private const val NOTE = 7100
     private const val TIMEOUT = 75_000L
-    private const val SILENT_OFF = "ussd_silent_off2"
+    /** How long a transfer waits for a phone locked with a password to be opened, before anything is dialed. */
+    private const val LOCK_WAIT = 5 * 60_000L
     private const val KEEP = 20
     private val main = Handler(Looper.getMainLooper())
     private val rnd = SecureRandom()
@@ -67,6 +66,9 @@ object Xfer {
         @Volatile var pinSent = false
         @Volatile var confirmSent = false
         @Volatile var dialed = false
+        @Volatile var timed = false
+        /** Waiting for the phone locked with a password to be opened before dialing. */
+        @Volatile var waitOpen = false
         @Volatile var seen = false
         @Volatile var done = false
         @Volatile var last = ""
@@ -214,7 +216,7 @@ object Xfer {
         synchronized(this) {
             val cur = job
             if (cur != null && !cur.done) {
-                if (System.currentTimeMillis() - cur.startedAt < TIMEOUT + 10_000L) {
+                if (System.currentTimeMillis() - cur.startedAt < LOCK_WAIT + TIMEOUT + 4 * 60_000L + 10_000L) {
                     val w = "فيه تحويل شغال دلوقتي، استنى يخلص"
                     finishEarly(app, store, id, base, w); return w
                 }
@@ -227,86 +229,59 @@ object Xfer {
         j.log(lockState(app))
         note(app, "⏳ بيحوّل ${Notifier.fmt(amount.toDouble())} ج لـ $to", if (from == "iphone") "طلب من الآيفون" else "من «محافظي»", true)
         refresh(app)
-        // with no screen first (works with the phone locked); the usual way if that can't be done
-        Thread { val done = try { silent(app, store, j) } catch (_: Exception) { false }; if (!done) main.post { if (job === j && !j.done) withScreen(app, j) } }.start()
+        main.post { if (job === j && !j.done) withScreen(app, j) }
         return null
     }
 
-    /** The usual way: our screen (wakes the phone, covers the lock), it dials, and [onScreen] answers Vodafone's screens. */
+    /**
+     * Our screen (wakes the phone, covers the lock), it dials, and [onScreen] answers Vodafone's screens.
+     * Vodafone's PIN question only works on its own screen: an answer put in the code itself ("*9*7*N*A*PIN#",
+     * sent with no screen by TelephonyManager.sendUssdRequest) came back "عفوا الرقم الذي ادخالته غير صحيح …", for
+     * a "0" and for the PIN alike. And on a phone locked with a password (Infinix) Vodafone's screen stays behind
+     * the lock. So then nothing is dialed until the phone is opened: our screen asks for it (fingerprint or
+     * password), and the code goes out the moment it's open; [LOCK_WAIT] with no opening = nothing was sent.
+     */
     private fun withScreen(app: Context, j: Job) {
-        j.log("بيطلب الكود بالشاشة")
         UssdService.watch(true)
         try {
             app.startActivity(Intent(app, XferActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS))
         } catch (_: Exception) { }
+        if (secureLocked(app)) {
+            j.waitOpen = true
+            j.log("مستني الموبايل يتفتح علشان يطلب الكود (فودافون بتسأل عن الرقم السري في شاشتها بس)")
+            Thread { record(Store(app), j.id, JSONObject().put("msg", "مستني قفل شاشة الأندرويد يتفتح (بصمة أو باسورد)، ولسه مفيش حاجة اتبعتت لفودافون")); refresh(app) }.start()
+            waitOpen(app, j, System.currentTimeMillis())
+            return
+        }
+        j.log("بيطلب الكود بالشاشة")
         main.postDelayed({ if (job === j && !j.dialed) dial(app, j) }, 2500)
-        main.postDelayed({ timeout(app, j, first = true) }, TIMEOUT)
     }
 
-    // ---------- with no screen ----------
+    /** Locked with a password, fingerprint or pattern: Vodafone's screen won't show until it's opened. */
+    fun secureLocked(ctx: Context): Boolean = try {
+        ctx.getSystemService(KeyguardManager::class.java).let { it != null && it.isKeyguardLocked && it.isDeviceSecure }
+    } catch (_: Exception) { false }
 
-    /** Sends one USSD code with no screen and waits for Vodafone's answer: (true, text), (false, why), or null on no answer. Blocking. */
-    @SuppressLint("MissingPermission")   // checked in start()
-    private fun ussd(ctx: Context, sub: Int, code: String, waitMs: Long = 30_000L): Pair<Boolean, String>? {
-        if (Build.VERSION.SDK_INT < 26) return null
-        val base = ctx.getSystemService(TelephonyManager::class.java) ?: return null
-        val tm = if (sub >= 0) base.createForSubscriptionId(sub) else base
-        val latch = CountDownLatch(1)
-        var res: Pair<Boolean, String>? = null
-        try {
-            tm.sendUssdRequest(code, object : TelephonyManager.UssdResponseCallback() {
-                override fun onReceiveUssdResponse(t: TelephonyManager, request: String, response: CharSequence) { res = Pair(true, response.toString()); latch.countDown() }
-                override fun onReceiveUssdResponseFailed(t: TelephonyManager, request: String, failureCode: Int) { res = Pair(false, "رمز $failureCode"); latch.countDown() }
-            }, main)
-        } catch (e: Exception) { return Pair(false, e.javaClass.simpleName) }
-        return if (latch.await(waitMs, TimeUnit.MILLISECONDS)) res else null
+    /** Checks every second and a half if the phone was opened: then dials; after [LOCK_WAIT] it ends with nothing sent. */
+    private fun waitOpen(app: Context, j: Job, since: Long) {
+        if (job !== j || j.done || j.dialed) return
+        if (!secureLocked(app)) { opened(app, j); return }
+        if (System.currentTimeMillis() - since > LOCK_WAIT) {
+            end(app, j, "fail", "الأندرويد فضل مقفول ومحدش فتحه، فالكود مااتطلبش ومفيش حاجة اتبعتت لفودافون. افتح الأندرويد وجرّب تاني")
+            return
+        }
+        main.postDelayed({ waitOpen(app, j, since) }, 1500)
     }
 
-    /**
-     * The transfer with no screen at all, so it works with the phone locked: Android sends the code and hands
-     * back Vodafone's answer as text, one answer per code. The PIN goes in the same code after "*"
-     * (*9*7*number*amount*PIN#), and only after the same code without it came back with Vodafone's PIN question
-     * for this same number and amount (page 1 of it is enough: in one code the "0:مزيد" pages take no key, the
-     * next answer goes to the question), so it can never land on another question.
-     * Returns false to do it the usual way (nothing typed yet then); true when it's over.
-     */
-    private fun silent(app: Context, store: Store, j: Job): Boolean {
-        // off for a day after it didn't work on this phone (a network hiccup shouldn't turn it off for good).
-        // "ussd_silent_off" was the old one, set by the "*0" page key that Vodafone read as a PIN: not read any more
-        if (Build.VERSION.SDK_INT < 26 || System.currentTimeMillis() - store.getLong(SILENT_OFF) < 24 * 3600_000L || !j.code.endsWith("#")) return false
-        val base = j.code.dropLast(1)
-        j.log("بيطلب الكود من غير شاشة")
-        val p = Ussd.probe(base, j.to, j.amount, { code -> if (j.done) null else ussd(app, j.sub, code).also { if (it != null && it.first) j.seen = true } }, { j.log(it) })
-        if (p is Ussd.Probe.No) {
-            j.log(p.why)
-            if (p.off) store.putLong(SILENT_OFF, System.currentTimeMillis())
-            return j.done
-        }
-        val pin = (p as Ussd.Probe.Pin).let { j.takePin() } ?: return false
-        // the next thing Vodafone expects is the PIN: from here on it's never sent a second time
-        j.pinSent = true
-        j.log("بعت الرقم السري في نفس الكود من غير شاشة")
-        val r = ussd(app, j.sub, "$base*$pin#", 45_000L)
-        if (r == null || !r.first) { end(app, j, "unsure", "فودافون مردتش. لو رسالة فودافون جت، التحويل هيتأكد لوحده"); return true }
-        j.log("فودافون (من غير شاشة): " + r.second)
-        if (Ussd.pinPage1(r.second, j.to, j.amount)) {
-            // the same question again with no error: the PIN in the code was skipped, so nothing was transferred
-            store.putLong(SILENT_OFF, System.currentTimeMillis())
-            end(app, j, "fail", "فودافون رجّعت نفس السؤال ومخدتش الرقم السري من الكود، فالتحويل ماتمش. التحويل الجاي هيتعمل بالشاشة")
-            return true
-        }
-        when (val v = Ussd.verdict(r.second, j.to, p.before)) {
-            "stop" -> {
-                // a confirmation after the PIN: this time it stops, the next ones the usual way for a day
-                store.putLong(SILENT_OFF, System.currentTimeMillis())
-                end(app, j, "stop", r.second + " (فودافون طلبت تأكيد، التحويل الجاي هيتعمل بالشاشة)")
-            }
-            else -> end(app, j, v, r.second)
-        }
-        return true
+    /** The phone was opened (from [waitOpen], or right away from our screen's unlock prompt): dial now. */
+    fun opened(ctx: Context, j: Job) {
+        if (job !== j || j.done || j.dialed || !j.waitOpen) return
+        j.waitOpen = false
+        j.log("الموبايل اتفتح، بيطلب الكود بالشاشة")
+        XferActivity.update()
+        main.postDelayed({ if (job === j && !j.dialed) dial(ctx.applicationContext, j) }, 700)
     }
-
 
     /** "مقفول بباسورد" / "مقفول من غير باسورد" / "مفتوح": for the step-by-step list. */
     private fun lockState(ctx: Context): String = try {
@@ -346,6 +321,7 @@ object Xfer {
     fun dial(ctx: Context, j: Job) {
         if (j.dialed || j.done) return
         j.dialed = true
+        if (!j.timed) { j.timed = true; val app = ctx.applicationContext; main.postDelayed({ timeout(app, j, first = true) }, TIMEOUT) }
         try {
             val tm = ctx.getSystemService(TelecomManager::class.java)
             val extras = Bundle()
@@ -743,7 +719,11 @@ class XferActivity : Activity() {
     companion object {
         @Volatile private var cur: WeakReference<XferActivity>? = null
         fun close() { cur?.get()?.let { a -> a.runOnUiThread { a.finish() } } }
+        /** The phone was opened: the screen says it's transferring now. */
+        fun update() { cur?.get()?.let { a -> a.runOnUiThread { a.show() } } }
     }
+
+    private var text: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -751,22 +731,43 @@ class XferActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
         else @Suppress("DEPRECATION") window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val kg = getSystemService(KeyguardManager::class.java)
-        // a lock screen with no password goes away by itself; a locked one stays, covered by this screen
-        if (kg != null && kg.isKeyguardLocked && !kg.isDeviceSecure) try { kg.requestDismissKeyguard(this, null) } catch (_: Exception) { }
         val j = Xfer.job
-        setContentView(TextView(this).apply {
-            text = if (j != null) "⏳\n«محافظي» بيحوّل ${Notifier.fmt(j.amount.toDouble())} ج لـ ${j.to}\nاستنى ثواني لحد ما فودافون ترد\n\nالشاشة دي بتقفل لوحدها لما التحويل يخلص" else ""
+        text = TextView(this).apply {
             textSize = 18f
             setTextColor(0xFFE6E8EB.toInt())
             setBackgroundColor(0xFF16181B.toInt())
             setPadding(48, 48, 48, 48)
             gravity = Gravity.CENTER
             setLineSpacing(0f, 1.35f)
-        })
+            // a tap asks for the unlock again (if the fingerprint prompt was closed)
+            setOnClickListener { unlock() }
+        }
+        setContentView(text)
         if (j == null || j.done) { finish(); return }
-        Handler(Looper.getMainLooper()).postDelayed({ Xfer.job?.let { if (it === j) Xfer.dial(this, it) } }, 600)
-        Handler(Looper.getMainLooper()).postDelayed({ if (!isFinishing) finish() }, 6 * 60_000L)
+        show()
+        // the lock goes away by itself with no password; with one, Android asks for it (fingerprint or password)
+        // right away, and Xfer dials the moment it's open (Vodafone's screen doesn't show over a locked phone)
+        unlock()
+        if (!j.waitOpen) Handler(Looper.getMainLooper()).postDelayed({ Xfer.job?.let { if (it === j) Xfer.dial(this, it) } }, 600)
+        Handler(Looper.getMainLooper()).postDelayed({ if (!isFinishing) finish() }, 12 * 60_000L)
+    }
+
+    private fun unlock() {
+        val kg = getSystemService(KeyguardManager::class.java) ?: return
+        if (!kg.isKeyguardLocked || Build.VERSION.SDK_INT < 26) return
+        try {
+            kg.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
+                override fun onDismissSucceeded() { Xfer.job?.let { if (!it.done) Xfer.opened(this@XferActivity, it) } }
+            })
+        } catch (_: Exception) { }
+    }
+
+    fun show() {
+        val j = Xfer.job ?: return
+        val amt = Notifier.fmt(j.amount.toDouble())
+        text?.text = if (j.waitOpen)
+            "🔒\nافتح الموبايل (بصمة أو باسورد)\nوالتحويل هيكمل لوحده\n\n«محافظي» هيحوّل $amt ج لـ ${j.to}\nفودافون بتسأل عن الرقم السري في شاشتها، وشاشتها مبتظهرش والموبايل مقفول\n\nلسه مفيش حاجة اتبعتت لفودافون"
+        else "⏳\n«محافظي» بيحوّل $amt ج لـ ${j.to}\nاستنى ثواني لحد ما فودافون ترد\n\nالشاشة دي بتقفل لوحدها لما التحويل يخلص"
     }
 
     override fun onDestroy() {

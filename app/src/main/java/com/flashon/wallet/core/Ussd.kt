@@ -90,61 +90,9 @@ object Ussd {
     /** The phone or the network failed to carry the code ("حدثت مشكلة في الاتصال أو رمز MMI غير صالح"): Vodafone never saw it. */
     fun glitch(text: String): Boolean = GLITCH.containsMatchIn(clean(text))
 
-    // ---------- the transfer with no screen (one code, the answers joined with "*") ----------
-
-    /** Where the code without the PIN got to. */
-    sealed class Probe {
-        /** The next thing Vodafone expects is the PIN: send the same code with "*PIN" added. [before] = what it showed. */
-        class Pin(val before: String) : Probe()
-        /** Can't be done with no screen ([off] = not on this phone for now). Nothing was typed: do it the usual way. */
-        class No(val why: String, val off: Boolean) : Probe()
-    }
-
-    // Vodafone's own question for this transfer, page 1: "لتحويل 5 ج بالإضافة ل1 ج رسوم لرقم 0100… بإسم … 0:مزيد"
-    private val TRANSFER_Q = Regex("^\\s*لتحويل\\s*([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*(?:ج|جنيه)")
-
-    /**
-     * Is this page 1 of Vodafone's PIN question for this same transfer, cut in pages before it gets to the PIN.
-     * On the phone the rest of it is "ع******** ادخل الرقم السري 1:للإعادة 2:لمعرفة الرسوم 00:رجوع", and in one
-     * code the pages take no key: the next answer in the code goes to that question (a "0" there came back as
-     * "عفوا الرقم الذي ادخالته غير صحيح لتحويل 5 ج …"). Only for the same number and the same amount, and not an error.
-     */
-    fun pinPage1(text: String, to: String, amount: Long): Boolean {
-        val t = clean(text)
-        if (moreKey(text) == null || WRONG.containsMatchIn(t) || CONFIRM.containsMatchIn(t) || STRONG_OK.containsMatchIn(t)) return false
-        val a = TRANSFER_Q.find(t)?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull() ?: return false
-        return a == amount.toDouble() && namesNumber(t, to)
-    }
-
-    /**
-     * Asks Vodafone [base]# ("*9*7*N*A#") with no PIN in it, and says if the next thing it expects is the PIN.
-     * Nothing else is ever added to the code: in one code a page's "0:مزيد" isn't a key, the next answer goes
-     * straight to Vodafone's question, so a "0" would be read as a (wrong) PIN. [ask] sends one code with no screen
-     * and returns (true, Vodafone's text), (false, why) or null for no answer.
-     */
-    fun probe(base: String, to: String, amount: Long, ask: (String) -> Pair<Boolean, String>?, log: (String) -> Unit): Probe {
-        val r = ask("$base#") ?: return Probe.No("مفيش رد من غير شاشة", false)
-        if (!r.first) return Probe.No("الكود من غير شاشة مش متاح (${r.second})", true)
-        log("فودافون (من غير شاشة): " + r.second)
-        val t = clean(r.second)
-        if (PIN.containsMatchIn(t) && !WRONG.containsMatchIn(t)) return Probe.Pin(r.second)
-        if (pinPage1(r.second, to, amount)) {
-            log("دي الصفحة الأولى من سؤال الرقم السري لنفس الرقم ونفس المبلغ")
-            return Probe.Pin(r.second)
-        }
-        return Probe.No("فودافون قالت حاجة تانية غير سؤال الرقم السري", false)
-    }
-
-    /** Vodafone's answer to the code with the PIN: "ok", "fail", "stop" (asked to confirm), or "unsure". */
-    fun verdict(res: String, to: String, before: String): String = when {
-        step(res, true, to, true, false, before) == Step.OK -> "ok"
-        asksPin(res) -> "fail"        // the PIN again: it was wrong
-        asks(res) -> "stop"           // a confirmation after the PIN
-        else -> when (step(res, false, to, true, false)) { Step.OK -> "ok"; Step.FAIL -> "fail"; else -> "unsure" }
-    }
-
-    /** Does this text ask for the PIN (the next thing to type is the PIN). */
-    fun asksPin(text: String): Boolean = PIN.containsMatchIn(clean(text))
+    // No transfer with no screen: Android's TelephonyManager.sendUssdRequest gives one answer per code, and
+    // Vodafone takes no answer inside the code itself ("*9*7*N*A*0#" and "*9*7*N*A*PIN#" both came back
+    // "عفوا الرقم الذي ادخالته غير صحيح لتحويل …"), so the PIN is only ever typed in Vodafone's own screen.
 
     /** Does this text ask something (the PIN, or to confirm): a question, even when it comes as a notification. */
     fun asks(text: String): Boolean { val t = clean(text); return PIN.containsMatchIn(t) || CONFIRM.containsMatchIn(t) }

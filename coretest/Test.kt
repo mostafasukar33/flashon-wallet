@@ -268,49 +268,10 @@ fun main() {
     check("real MMI error = a hiccup (try again)", Ussd.glitch(mmi) && Ussd.glitch("Connection problem or invalid MMI code."))
     check("a wrong PIN isn't a hiccup", !Ussd.glitch("عفواً، الرقم السري غير صحيح") && !Ussd.glitch("رصيدك غير كافٍ"))
 
-    // ---- the transfer with no screen, against a fake Vodafone that answers like the real one ----
-    // in one code the "0:مزيد" pages take no key: whatever comes after *9*7*N*A is the answer to the PIN question
-    // (the real answer to "*9*7*N*A*0#" was the error below, and the same one again to "*0*0#")
-    val donePg = "تم تحويل 5 جنيه لرقم 01005174644 مصاريف الخدمة 1 جنيه . اطلب #9* و اشحن 0:مزيد"
-    val realPg1 = "لتحويل 5 ج بالإضافة ل1 ج رسوم لرقم 01005174644 بإسم مصطفى م*** م**** 0:مزيد"
-    val badAnswer = "عفوا الرقم الذي ادخالته غير صحيح لتحويل 5 ج بالإضافة ل1 ج رسوم لرقم 0:مزيد"
-    fun vodafone(pages: Boolean, pinOk: Boolean = true): (String) -> Pair<Boolean, String>? = { code ->
-        val parts = code.removeSuffix("#").split("*").drop(5)   // what comes after *9*7*N*A
-        when {
-            parts.isEmpty() -> Pair(true, if (pages) realPg1 else "لتحويل 5 ج لرقم 01005174644 ادخل الرقم السري")
-            parts.size == 1 && parts[0].length == 6 -> Pair(true, if (pinOk) donePg else "الرقم السري غير صحيح")
-            else -> Pair(true, badAnswer)
-        }
-    }
-    val sentCodes = ArrayList<String>()
-    val pr = Ussd.probe("*9*7*01005174644*5", me, 5, { c -> sentCodes += c; vodafone(true)(c) }, { })
-    check("no screen: real page 1 = the PIN question", pr is Ussd.Probe.Pin, pr)
-    check("no screen: no \"*0\" sent, nothing but the code itself before the PIN", sentCodes == listOf("*9*7*01005174644*5#"), sentCodes)
-    check("no screen: the code with the PIN goes through", vodafone(true)("*9*7*01005174644*5*123456#")?.second == donePg)
-    check("no screen: done = ok", Ussd.verdict(donePg, me, (pr as Ussd.Probe.Pin).before) == "ok")
-    check("no screen: the old *0 way gets the real error", vodafone(true)("*9*7*01005174644*5*0#")?.second == badAnswer)
-    check("no screen: the real error after the PIN = fail", Ussd.verdict(badAnswer, me, realPg1) == "fail", Ussd.verdict(badAnswer, me, realPg1))
-    check("no screen: the real error isn't the PIN question", !Ussd.pinPage1(badAnswer, me, 5))
-    check("no screen: page 1 with the other spelling (لـ1)", Ussd.pinPage1(page1, me, 5))
-    check("no screen: page 1 for another number isn't", !Ussd.pinPage1(realPg1, "01099999999", 5))
-    check("no screen: page 1 for another amount isn't", !Ussd.pinPage1(realPg1, me, 50))
-    check("no screen: page 1 with no more pages isn't (it would be the whole question)", !Ussd.pinPage1("لتحويل 5 ج بالإضافة ل1 ج رسوم لرقم 01005174644 بإسم مصطفى", me, 5))
-    check("no screen: page 1 with Arabic digits and 1,500", Ussd.pinPage1("لتحويل ١,٥٠٠ ج بالإضافة ل1 ج رسوم لرقم ٠١٠٠٥١٧٤٦٤٤ بإسم مصطفى 0:مزيد", me, 1500))
-    val pr2 = Ussd.probe("*9*7*01005174644*5", me, 5, vodafone(false), { })
-    check("no screen: the PIN asked on the first page", pr2 is Ussd.Probe.Pin, pr2)
-    check("no screen: wrong PIN = fail", Ussd.verdict("الرقم السري غير صحيح، ادخل الرقم السري مرة اخرى", me, "") == "fail")
-    check("no screen: a confirmation after the PIN = stop", Ussd.verdict("للتأكيد اضغط 1", me, "") == "stop")
-    val pr3 = Ussd.probe("*9*7*01005174644*5", "01099999999", 5, vodafone(true), { })
-    check("no screen: page 1 for another number = usual way, nothing typed", pr3 is Ussd.Probe.No && !pr3.off)
-    val pr4 = Ussd.probe("*9*7*01005174644*5", me, 5, { Pair(false, "رمز -1") }, { })
-    check("no screen: not possible on this phone = usual way", pr4 is Ussd.Probe.No && pr4.off)
-    val sent5 = ArrayList<String>()
-    val pr5 = Ussd.probe("*9*7*01005174644*5", me, 5, { c -> sent5 += c; Pair(true, "عروض محفظتك الجديدة 0:مزيد") }, { })
-    check("no screen: another page with 0:مزيد = usual way, no 0 sent", pr5 is Ussd.Probe.No && !pr5.off && sent5.size == 1, sent5)
-    val pr6 = Ussd.probe("*9*7*01005174644*5", me, 5, { Pair(true, "1- تحويل فلوس\n2- شحن") }, { })
-    check("no screen: another question = usual way, nothing typed", pr6 is Ussd.Probe.No && !pr6.off)
-    check("no screen: an error that names the PIN isn't the question", Ussd.probe("*9*7*01005174644*5", me, 5, { Pair(true, "عفوا الرقم السري غير صحيح") }, { }) is Ussd.Probe.No)
-    check("no screen: no answer = usual way", Ussd.probe("*9*7*01005174644*5", me, 5, { null }, { }) is Ussd.Probe.No)
+    // ---- Vodafone's real answer to an answer put inside the code ("*9*7*N*A*0#" and "*9*7*N*A*PIN#") ----
+    val badAnswer = "عفوا الرقم الذي ادخالته غير صحيح لتحويل 10000 ج بالإضافة ل15 ج رسوم لرقم 0:مزيد"
+    check("real 'incorrect' answer = failed", Ussd.step(badAnswer, false, me, true, false) == Ussd.Step.FAIL, Ussd.step(badAnswer, false, me, true, false))
+    check("real 'incorrect' answer isn't done or a PIN question", Ussd.step(badAnswer, true, me, true, false).let { it != Ussd.Step.OK && it != Ussd.Step.PIN && it != Ussd.Step.CONFIRM })
 
     // ---- a question, even when it comes as a notification ----
     check("asks: PIN", Ussd.asks("لتأكيد تحويل 500 جنيه الى 01012345678 ادخل الرقم السري"))
