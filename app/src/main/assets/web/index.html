@@ -122,7 +122,7 @@ var VIEW = !!(B && B.viewOnly);
 if (VIEW) document.documentElement.classList.add('view');
 if (!B) {
   var mock = {
-    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:false, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
+    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:true, notifOk:true, watch:true, hold:{n:3,at:Date.now()-120000,gap:540000,best:0,proven:1200000,held:true,missAt:Date.now()-120000,missLag:511000,tr:true}, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
     settings:{monthReceive:200000,monthSend:200000,daySend:60000,dayReceiveOn:false,dayReceive:60000,feesCount:true},
     update:{available:true,version:'2'},
     months:['2026-10'],
@@ -153,6 +153,8 @@ if (!B) {
     saveSettings:function(j){mock.settings=JSON.parse(j);setTimeout(App.reload,50)},
     openBattery:function(){mock.batteryOk=true;setTimeout(App.reload,50)},
     openAutostart:function(){toast('بيفتح التشغيل التلقائي…')},
+    openAppBattery:function(){toast('بيفتح صفحة البطارية…')},
+    openPowerSaving:function(){toast('بيفتح توفير البطارية…')},
     rescan:function(){setTimeout(App.reload,300)},
     checkUpdate:function(){setTimeout(function(){App.onUpdate(JSON.stringify(mock.update))},400)},
     downloadUpdate:function(){toast('بينزل التحديث…')},
@@ -286,7 +288,10 @@ function home(){
       '<div><span>فاضل تحويل الشهر ده</span><b class="num" style="text-align:right">'+fmt(leftM)+'</b></div></div>'+
       (locked>0.5?'<div class="lock">'+fmt(locked)+' ج هيتقفلوا للشهر الجاي</div>':'')+'</div>';
   }
-  if (!VIEW && !D.batteryOk) h+='<div class="minibat"><span>اسمح للتطبيق يشتغل في الخلفية عشان ميفوتش رسايل</span><button data-act="battery">اسمحله</button></div>';
+  if (!VIEW && held()) h+='<div class="alert bad" style="gap:8px"><b>⚠️ الموبايل وقّف التطبيق '+dur(D.hold.gap)+' وهو مقفول</b>'+
+    '<span style="line-height:1.7">علشان كده التحويل مبيوصلش ولا بيروح الآيفون غير لما تفتح التطبيق. ده إعداد في الموبايل نفسه بيجمّد التطبيقات المقفولة، ولازم يتقفل مرة واحدة بإيدك.</span>'+
+    '<button class="btn main" data-act="fixhold">صلّحه دلوقتي</button></div>';
+  else if (!VIEW && !D.batteryOk) h+='<div class="minibat"><span>اسمح للتطبيق يشتغل في الخلفية عشان ميفوتش رسايل</span><button data-act="battery">اسمحله</button></div>';
 
   // ---- each wallet ----
   h+='<div class="grid2" id="wallets">'+D.now.map(function(n){
@@ -444,7 +449,8 @@ function settingsScreen(){
         '<span>2. من زرار المشاركة اختار "Add to Home Screen".</span>'+
         '<span>3. افتحه من الأيقونة الجديدة، واكتب الباسورد مرة واحدة.</span>'+
         '<span>4. دوس "شغّل الإشعارات" ووافق.</span></div>'+
-      (D.batteryOk===false||D.watch===false||D.notifOk===false?'<div class="alert mid"><b>⚠️ الموبايل ده بيوقّف التطبيق وهو مقفول، فالإشعارات بتتأخر</b><span style="line-height:1.7">اسمح له مرة واحدة بالزرارين دول، والتحويل يوصل الآيفون في نفس اللحظة حتى والتطبيق مقفول.</span>'+bgBtns()+'</div>':'')+
+      (held()?'<div class="alert bad"><b>⚠️ الموبايل بيجمّد التطبيق وهو مقفول، فالإشعار مبيوصلش الآيفون غير لما تفتحه</b><button class="btn main" data-act="fixhold">صلّحه دلوقتي</button></div>':
+       D.batteryOk===false||D.watch===false||D.notifOk===false?'<div class="alert mid"><b>⚠️ الموبايل ده بيوقّف التطبيق وهو مقفول، فالإشعارات بتتأخر</b><span style="line-height:1.7">اسمح له مرة واحدة بالزرارين دول، والتحويل يوصل الآيفون في نفس اللحظة حتى والتطبيق مقفول.</span>'+bgBtns()+'</div>':'')+
       '<div class="grid2"><button class="btn ghost" data-act="syncnew">لينك وباسورد جداد</button><button class="btn ghost" data-act="syncoff">اقفله</button></div>'+
       '<span class="xs mute" style="line-height:1.6">"لينك وباسورد جداد" بيقفل القديم على أي موبايل كان فاتحه. الباسورد مش محفوظ في أي حتة، فلو نسيته اعمل جديد.</span>';
   }
@@ -460,10 +466,54 @@ function settingsScreen(){
     '<div class="grid2"><select id="ex_m" class="pill" style="min-height:48px;border-radius:10px">'+mo+'</select><select id="ex_w" class="pill" style="min-height:48px;border-radius:10px">'+wo+'</select></div>'+
     '<button class="btn ghost" data-act="export">اعمل الملف وابعته</button><span class="xs mute" style="line-height:1.6">ملف بيتفتح على Excel، تقدر تبعته واتساب أو إيميل أو تحفظه على Drive.</span></div>';
 
-  h+='<div class="card col" style="gap:10px"><h2>التشغيل في الخلفية</h2><span class="small mute" style="line-height:1.7">'+(D.batteryOk&&D.watch!==false&&D.notifOk!==false?'التطبيق شغال ومستني التحويلات حتى وهو مقفول ✓ (علشان كده فيه سطر «💰 محافظي شغال» ثابت فوق).':'التطبيق ممكن يتقفل لوحده عشان البطارية، فممكن تتأخر الإشعارات.')+'</span>'+bgBtns()+'</div>';
+  h+='<div class="card col" style="gap:10px"><h2>التشغيل في الخلفية</h2>'+bgState()+'</div>';
   h+='<div class="card col" style="gap:10px"><h2>الرسايل</h2><span class="small mute" style="line-height:1.7">لو حاسس إن فيه عملية ناقصة، خلي التطبيق يقرا كل الرسايل من الأول.</span><button class="btn ghost" data-act="rescan">اقرا الرسايل من جديد</button></div>';
   h+='<div class="card col" style="gap:10px"><h2>التطبيق</h2><span class="small mute">النسخة '+esc(D.version)+'</span><button class="btn ghost" data-act="chkupd">شوف فيه تحديث</button></div>';
   return h+'</div>';
+}
+
+function held(){ return !!(D.hold && D.hold.held); }
+function times(n){ return n===2?'مرتين':n<=10?n+' مرات':n+' مرة'; }
+function en(t){ return '<bdi dir="ltr" style="white-space:nowrap">('+t+')</bdi>'; }
+function dur(ms){
+  var m=Math.round(ms/60000);
+  if (m<1) return 'أقل من دقيقة'; if (m===1) return 'دقيقة'; if (m===2) return 'دقيقتين'; if (m<=10) return m+' دقايق'; if (m<60) return m+' دقيقة';
+  var h=Math.round(m/60); return h===1?'ساعة':h===2?'ساعتين':h<=10?h+' ساعات':h+' ساعة';
+}
+function bgState(){
+  var H=D.hold||{};
+  if (held()) {
+    return '<div class="alert bad"><b>⚠️ الموبايل جمّد التطبيق '+dur(H.gap)+' وهو مقفول</b>'+
+      '<span style="line-height:1.7">آخر مرة '+dayF.format(new Date(H.at))+' الساعة '+timeF.format(new Date(H.at))+(H.n>1?'، واتكررت '+times(H.n):'')+'.'+
+      (H.missLag?' وآخر تحويل وصل التطبيق بعد '+dur(H.missLag)+' من وصول الرسالة.':'')+
+      ' وهو متجمّد مفيش أي حاجة في التطبيق بتشتغل، ولا حتى استقبال الرسايل، لحد ما تفتحه. والتطبيق ميقدرش يقفل الإعداد ده لوحده، فاعمل الخطوات دي مرة واحدة:</span></div>'+holdSteps();
+  }
+  if (H.at) {
+    return '<div class="alert good"><b>✓ اتصلحت</b><span style="line-height:1.7">التطبيق فضل صاحي '+dur(H.best)+' والشاشة مقفولة من غير ما الموبايل يجمّده، فالتحويل بيوصل الآيفون في نفس اللحظة.</span></div>'+
+      '<span class="xs mute" style="line-height:1.6">لو رجع جمّده تاني هيظهرلك تنبيه أحمر فوق على طول.</span>';
+  }
+  return '<span class="small mute" style="line-height:1.7">التطبيق شغال ومستني التحويلات (علشان كده فيه سطر «💰 محافظي شغال» ثابت فوق). وبيراقب نفسه: لو الموبايل جمّده وهو مقفول هيظهرلك تنبيه أحمر على طول.</span>'+bgBtns();
+}
+function holdSteps(){
+  var H=D.hold||{}, tr=!!H.tr;
+  return '<div class="col" style="gap:8px;line-height:1.7">'+
+    (D.notifOk===false?'<button class="btn ghost" data-act="notif">شغّل إشعارات التطبيق</button>':'')+
+    (D.batteryOk===false?'<button class="btn ghost" data-act="battery">من غير توفير بطارية</button><span class="xs mute">دوس «سماح» (Allow).</span>':'')+
+    '<b>1. صفحة البطارية بتاعة «محافظي» (دي الأهم)</b>'+
+    '<button class="btn main" data-act="appbat">افتحها</button>'+
+    '<span class="small">'+(tr?'شغّل <b>«السماح بالنشاط في الخلفية»</b> '+en('Allow background activity')+'، و<b>اقفل «إيقاف التطبيق عند الخمول»</b> '+en('Stop app when idle')+'. التانية دي هي اللي بتجمّد التطبيق.':
+      'شغّل «السماح بالنشاط في الخلفية» '+en('Allow background activity')+' واختار «غير مقيد» '+en('Unrestricted')+'، واقفل أي اختيار بيوقف التطبيق وهو مش مستخدم.')+
+      ' لو فتحتلك صفحة التطبيق نفسه، ادخل على «البطارية» الأول.</span>'+
+    '<b>2. التشغيل التلقائي</b>'+
+    '<button class="btn ghost" data-act="autostart">افتحه</button>'+
+    '<span class="small">شغّل المفتاح اللي جنب «محافظي».'+(tr?' ولو في Phone Master فيه «التطبيقات المحمية» '+en('Protected apps')+' ضيفه فيها.':'')+'</span>'+
+    '<b>3. اقفله في التطبيقات المفتوحة 🔒</b>'+
+    '<span class="small">'+(tr?'افتح التطبيقات المفتوحة، دوس على السهم الصغير جنب اسم «محافظي» فوق الكارت، واختار «قفل».':'افتح التطبيقات المفتوحة واسحب كارت «محافظي» لتحت أو دوس عليه مطوّل واختار القفل.')+'</span>'+
+    '<b>4. توفير البطارية في الموبايل</b>'+
+    '<button class="btn ghost" data-act="powersave">افتحه</button>'+
+    '<span class="small">اقفل «التوفير التلقائي للطاقة» و«تحسين وضع السكون» '+en('Sleep mode optimisation')+' لو موجودين.</span>'+
+    '<div class="alert mid"><b>وبعدها جرّب</b><span style="line-height:1.7">اقفل الشاشة وسيب الموبايل '+dur(H.proven||1200000)+' من غير ما تفتح التطبيق. هو بيراقب نفسه كل دقيقة، ولما تفتحه هتلاقي هنا «✓ اتصلحت» أو هيقولك إنه لسه بيتجمّد.</span></div>'+
+    '</div>';
 }
 
 function bgBtns(){
@@ -533,6 +583,9 @@ document.addEventListener('click', function(e){
     case 'perm': B.requestSms(); break;
     case 'battery': B.openBattery(); break;
     case 'autostart': if (B.openAutostart) B.openAutostart(); break;
+    case 'appbat': if (B.openAppBattery) B.openAppBattery(); else B.openBattery(); break;
+    case 'powersave': if (B.openPowerSaving) B.openPowerSaving(); break;
+    case 'fixhold': openSheet('<h2>علشان الموبايل ميجمّدش التطبيق</h2>'+holdSteps()); break;
     case 'notif': if (B.openNotif) B.openNotif(); break;
     case 'settings': go('settings'); break;
     case 'back': back(); break;

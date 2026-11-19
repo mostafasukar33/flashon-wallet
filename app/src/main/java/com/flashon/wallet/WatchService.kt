@@ -39,9 +39,13 @@ class WatchService : Service() {
         @Volatile var running = false
             private set
         @Volatile var bornAt = 0L   // when this process started the watcher (0 = not in this process)
-        /** Last time each way caught something (any SMS), for the server log only. */
+        /** Last time each way caught something (any SMS) and how many times, for the server log only. */
         @Volatile var seen = HashMap<String, Long>()
-        fun saw(way: String) { seen = HashMap(seen).also { it[way] = System.currentTimeMillis() } }
+        @Volatile var counts = HashMap<String, Int>()
+        @Synchronized fun saw(way: String) {
+            seen = HashMap(seen).also { it[way] = System.currentTimeMillis() }
+            counts = HashMap(counts).also { it[way] = (it[way] ?: 0) + 1 }
+        }
 
         /** Starts the watcher if SMS reading is allowed. Safe to call any time, from anywhere. */
         fun start(ctx: Context) {
@@ -67,6 +71,7 @@ class WatchService : Service() {
         } catch (_: Exception) { stopSelf(); return START_NOT_STICKY }
         running = true
         if (bornAt == 0L) bornAt = System.currentTimeMillis()
+        try { Freeze.beat(this) } catch (_: Exception) { }   // a long silence before this start = the phone held the app
         if (thread == null) watch()
         TickReceiver.next(this)
         handler?.post(scan)   // anything that came while the watcher was stopped
@@ -198,6 +203,7 @@ class TickReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         WatchService.saw("tick")
         next(context)
+        try { Freeze.beat(context) } catch (_: Exception) { }
         val pending = goAsync()
         Thread {
             try { SmsSource.catchUp(context, "tick") } catch (_: Exception) { } finally { pending.finish() }

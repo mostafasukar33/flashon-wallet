@@ -23,6 +23,7 @@ object DataJson {
         o.put("permission", SmsSource.hasPermission(ctx))
         o.put("batteryOk", pm.isIgnoringBatteryOptimizations(ctx.packageName))
         o.put("watch", WatchService.running)
+        o.put("hold", Freeze.json(store))   // did the phone freeze the app while closed (Infinix "Stop app when idle")
         o.put("notifOk", ctx.getSystemService(android.app.NotificationManager::class.java).areNotificationsEnabled())
         o.put("settings", JSONObject()
             .put("monthReceive", lim.monthReceive).put("monthSend", lim.monthSend)

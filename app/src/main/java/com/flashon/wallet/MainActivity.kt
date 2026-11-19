@@ -313,6 +313,34 @@ class MainActivity : Activity() {
         }
 
         /**
+         * The app's own battery page. On Infinix / Tecno (XOS, HiOS) that's where "Allow background
+         * activity" and "Stop app when idle" are: the second one is what freezes the app while it's
+         * closed, so no SMS reaches it until it's opened. Falls back to the app's settings page.
+         */
+        @JavascriptInterface
+        fun openAppBattery() {
+            main.post {
+                val pkg = Uri.parse("package:$packageName")
+                val tries = listOf(
+                    Intent("android.settings.VIEW_ADVANCED_POWER_USAGE_DETAIL").setData(pkg),
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg))
+                for (i in tries) {
+                    try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return@post } catch (_: Exception) { }
+                }
+            }
+        }
+
+        /** The phone's own battery saving screen (sleep optimisation, automatic power saving). */
+        @JavascriptInterface
+        fun openPowerSaving() {
+            main.post {
+                for (a in listOf(Intent.ACTION_POWER_USAGE_SUMMARY, Settings.ACTION_BATTERY_SAVER_SETTINGS)) {
+                    try { startActivity(Intent(a).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return@post } catch (_: Exception) { }
+                }
+            }
+        }
+
+        /**
          * "Start by itself" (auto-start) screen: Infinix/Tecno/itel (Phone Master), then Xiaomi, Oppo/Realme,
          * Vivo, Huawei; any other phone gets the app's own settings page.
          */
