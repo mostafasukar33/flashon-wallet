@@ -77,7 +77,8 @@ object Notifier {
             val label = l.accountNames[p.wallet.key + raw.sim]?.takeIf { it.isNotBlank() }
                 ?: l.accountNames[p.wallet.key]?.takeIf { it.isNotBlank() } ?: p.wallet.label
             val name = p.phone?.let { l.names[it] } ?: p.smsName ?: p.phone
-            val bal = p.balance?.let { " · الرصيد ${fmt(it)}" } ?: ""
+            // a "balance" equal to the amount is the price read twice (the ledger drops it too), so it isn't shown
+            val bal = p.balance?.takeIf { Math.abs(it - a) > 0.011 }?.let { " · الرصيد ${fmt(it)}" } ?: ""
             out += when (p.type) {
                 com.flashon.wallet.core.TxType.IN -> Msg("+${fmt(a)} ج" + (name?.let { " من $it" } ?: ""), label + bal, raw.id)
                 com.flashon.wallet.core.TxType.OUT -> {

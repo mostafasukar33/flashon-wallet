@@ -58,7 +58,16 @@ object Parser {
     private val RX4 = Regex("(?:رقم العملية|رقم المعاملة|رقم المرجع|transaction id|trx id|ref(?:erence)?(?: no)?)[^\\d]{0,12}(\\d{6,})", RegexOption.IGNORE_CASE)
     private val RX5 = Regex("\\b\\d{1,2}:\\d{2}(?::\\d{2})?\\b")
     private val RX6 = Regex("\\b\\d{2,4}[-/]\\d{1,2}[-/]\\d{1,4}\\b")
-    private val RX7 = Regex("(?:رصيد|balance)[^\\d]{0,45}?$NUM", RegexOption.IGNORE_CASE)
+    // every "رصيد … number" in the message: group 1 = the words in between, group 2 = the number
+    private val RX7 = Regex("(?:رصيد|balance)([^\\d]{0,45}?)$NUM", RegexOption.IGNORE_CASE)
+    private val BAL_WORD = Regex("رصيد|balance", RegexOption.IGNORE_CASE)
+    // "رصيد" right after these is phone credit being bought, not the wallet's balance ("تم شحن رصيد بقيمة 52")
+    private val BAL_BEFORE_NOT = Regex("(?:شحن|شحنت|اشحن|إشحن|كارت|كروت|فكة|فكه|سلفة|سلفه|تحويل)\\s*$")
+    // …and these between "رصيد" and the number too ("رصيد بقيمة 52 لرقم …", "رصيد 52 دقيقة")
+    private val BAL_BETWEEN_NOT = Regex("بقيمة|بقيمه|بمبلغ|قيمة|قيمه|قيمته|لرقم|للرقم|الى رقم|إلى رقم|موبايل|المكالمات|مكالمات|دقائق|دقيقة|ميجا|جيجا|وحدة|وحدات|باقة|باقه|فليكس|flex|اضافي|إضافي", RegexOption.IGNORE_CASE)
+    // words that say it's the wallet's own balance
+    private val BAL_WALLET = Regex("محفظ|كاش|cash|wallet|حساب|account|money", RegexOption.IGNORE_CASE)
+    private val BAL_NOW = Regex("الحالي|الحالى|المتاح|المتبقي|المتبقى|بعد|current|available|:", RegexOption.IGNORE_CASE)
     private val RX8 = Regex("(?:مصاريف|رسوم|عمولة|fees?|charges?)[^\\d]{0,18}?$NUM", RegexOption.IGNORE_CASE)
     private val RX9 = Regex("(?:رقم محفظتك|محفظتك رقم|على محفظتك|علي محفظتك|your wallet(?: number)?)\\s*:?\\s*(01\\d{8,10})", RegexOption.IGNORE_CASE)
     private val RX10 = Regex("(?<!\\d)(?:\\+?2)?(01\\d{8,10})(?!\\d)")
@@ -99,12 +108,21 @@ object Parser {
 
     fun toNumber(s: String): Double? = s.replace(",", "").toDoubleOrNull()
 
+    // the operator's own messages about phone credit and bundles (they often just mention "pay with Vodafone Cash")
+    private val AIRTIME = Regex("باقة|باقه|باقتك|فليكس|flex|ميجا|جيجا|دقيقة|دقائق|وحدة|وحدات|كارت شحن|شحن رصيد|رصيد الموبايل|رصيدك الأساسي|رصيدك الاساسي|سلفني|سلفة|سلفه|انترنت|إنترنت|internet|mb\\b|gb\\b", RegexOption.IGNORE_CASE)
+    // …unless the message itself is about the wallet
+    private val STRONG_WALLET = Regex("محفظ|wallet|حساب(?:ك)? (?:في|فى) فودافون كاش|فودافون كاش الحالي|فودافون كاش الحالى|etisalat money|e& money|اتصالات كاش|اتصالات موني", RegexOption.IGNORE_CASE)
+
     fun walletOf(sender: String, body: String): Wallet? {
         val s = sender.lowercase()
         val b = body.lowercase()
         val looksLikeWallet = b.contains("كاش") || b.contains("محفظ") || b.contains("cash") ||
             b.contains("wallet") || s.contains("cash")
         if (!looksLikeWallet) return null
+        // a bundle / phone-credit message from Vodafone or Etisalat themselves (not the wallet's sender) that only names
+        // the wallet: its "رصيدك" is the phone credit (a 52 pound bundle showed the wallet at 52 instead of 10,000)
+        val walletSender = s.contains("cash") || s.contains("كاش") || s.contains("money") || s.contains("محفظ")
+        if (!walletSender && AIRTIME.containsMatchIn(b) && !STRONG_WALLET.containsMatchIn(b)) return null
         if (s.contains("vf") || s.contains("vodafone") || s.contains("فودافون")) return Wallet.VODAFONE
         if (s.contains("etisalat") || s.contains("e&") || s.contains("اتصالات") || s.contains("emoney") || s.contains("e-money"))
             return Wallet.ETISALAT
@@ -188,11 +206,26 @@ object Parser {
         work = work.replace(RX5, " ")
             .replace(RX6, " ")
 
-        // Balance
+        // Balance: of all the "رصيد … number" in the message, the one that is the wallet's (a recharge message has
+        // the phone credit bought first: "تم شحن رصيد بقيمة 52 … رصيد حسابك فى فودافون كاش الحالي 9948")
         var balance: Double? = null
         var balanceRange: IntRange? = null
-        RX7.find(work)?.let { m ->
-            balance = toNumber(m.groupValues[1]); balanceRange = m.groups[1]!!.range
+        var bestScore = 0
+        for (at in BAL_WORD.findAll(work)) {
+            // each "رصيد" on its own, so one can't swallow the next ("شحن رصيد لرقمك. رصيد حسابك الحالي 9948")
+            val m = RX7.find(work, at.range.first)?.takeIf { it.range.first == at.range.first } ?: continue
+            val between = m.groupValues[1]
+            if (BAL_WORD.containsMatchIn(between)) continue
+            val before = work.substring(maxOf(0, m.range.first - 14), m.range.first)
+            val num = m.groups[2]!!
+            if (BAL_BEFORE_NOT.containsMatchIn(before) || BAL_BETWEEN_NOT.containsMatchIn(between)) continue
+            if (num.value.replace(",", "").startsWith("01") && num.value.length >= 10) continue   // a phone number
+            val score = when {
+                BAL_WALLET.containsMatchIn(between) || BAL_WALLET.containsMatchIn(before) -> 3
+                BAL_NOW.containsMatchIn(between) -> 2
+                else -> 1
+            }
+            if (score >= bestScore) { bestScore = score; balance = toNumber(num.value); balanceRange = num.range }   // a tie: the later one
         }
 
         // Fee

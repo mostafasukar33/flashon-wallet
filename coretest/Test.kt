@@ -183,6 +183,34 @@ fun main() {
         check("et in [$snd]", i != null && i.wallet == Wallet.ETISALAT && i.type == TxType.IN && i.amount == 4500.0 && i.balance == 60157.29 && i.phone == "01063470062" && i.smsName == "Mohamed G Derar", i)
     }
 
+    // ---- the balance is the wallet's, not the phone credit / bundle price ----
+    val rc = Parser.parse(RawSms("rc", "VF-Cash", "تم شحن رصيد بقيمة 52 جنيه لرقم 01012345678 بنجاح. رصيد حسابك فى فودافون كاش الحالي 9948.00", 0))
+    check("recharge: wallet balance, not the credit", rc != null && rc.balance == 9948.0 && rc.amount == 52.0, rc)
+    val rc2 = Parser.parse(RawSms("rc2", "VF-Cash", "تم شحن رصيد لرقمك. رصيد حسابك الحالي 9948 جنيه", 0))
+    check("recharge: one balance word doesn't hide the next", rc2?.balance == 9948.0, rc2)
+    val bdl = Parser.parse(RawSms("bd", "VF-Cash", "تم شراء باقة فليكس بمبلغ 52 جنيه من محفظتك. رصيد محفظتك الحالي 9,948 جنيه", 0))
+    check("bundle from the wallet", bdl != null && bdl.balance == 9948.0 && bdl.amount == 52.0 && bdl.type == TxType.OUT, bdl)
+    check("operator recharge message isn't the wallet", Parser.parse(RawSms("op", "Vodafone", "تم شحن رصيد 52 جنيه بنجاح عن طريق فودافون كاش. رصيدك الحالي 52.00 جنيه", 0)) == null)
+    check("operator bundle renewal isn't the wallet", Parser.parse(RawSms("op2", "Vodafone", "تم تجديد باقة فليكس 52 بنجاح وتم خصم 52 جنيه. ادفع فواتيرك بفودافون كاش", 0)) == null)
+    check("a wallet message from the operator's name still counts",
+        Parser.parse(RawSms("op3", "Vodafone", "تم شراء باقة بمبلغ 52 جنيه. رصيد حسابك فى فودافون كاش الحالي 9948.00", 0))?.balance == 9948.0)
+    check("received still reads", Parser.parse(in1)?.balance == 64432.20)
+    val zb = ZoneId.of("Africa/Cairo")
+    val b1 = RawSms("b1", "VF-Cash", "تم استلام مبلغ 10000 جنيه من رقم 01011112222 على رقم محفظتك 01005174644. رصيدك الحالي: 10000.00 جنيه", t("2026-11-01T10:00:00+02:00"))
+    val b2 = RawSms("b2", "VF-Cash", "تم دفع 52 جنيه لباقة فليكس رصيدك 52", t("2026-11-02T10:00:00+02:00"))
+    val lbb = Ledger(listOf(b1, b2), Limits(), Learned(), zb, t("2026-11-03T10:00:00+02:00"))
+    check("balance = price is dropped, the wallet keeps 10,000", lbb.now(lbb.accounts.first()).balance == 10000.0, lbb.now(lbb.accounts.first()).balance)
+    val b3 = RawSms("b3", "VF-Cash", "عرض فودافون كاش: اشحن واكسب، رصيدك الحالي 7 نقاط بقيمة", t("2026-11-02T11:00:00+02:00"))
+    val b4 = RawSms("b4", "VF-Cash", "حول فلوس لأي محفظة فودافون كاش ورصيدك 3 جنيه هدية", t("2026-11-02T12:00:00+02:00"))
+    val lo = Ledger(listOf(b1, b3, b4), Limits(), Learned(), zb, t("2026-11-03T10:00:00+02:00"))
+    check("an offer doesn't change the balance", lo.now(lo.accounts.first()).balance == 10000.0, lo.now(lo.accounts.first()).balance)
+    val b5 = RawSms("b5", "VF-Cash", "تم تحويل 500 جنيه لرقم 01099998888 مصاريف الخدمة 1 جنيه رصيد حسابك فى فودافون كاش الحالي 9499.00", t("2026-11-02T13:00:00+02:00"))
+    val lc = Ledger(listOf(b1, b5), Limits(), Learned(), zb, t("2026-11-03T10:00:00+02:00"))
+    check("a transfer that adds up keeps its balance", lc.now(lc.accounts.first()).balance == 9499.0, lc.now(lc.accounts.first()).balance)
+    val b6 = RawSms("b6", "VF-Cash", "تم تحويل 100 جنيه لرقم 01099998888 رصيد حسابك فى فودافون كاش الحالي 300.00", t("2026-11-02T14:00:00+02:00"))
+    val lj = Ledger(listOf(b1, b6), Limits(), Learned(), zb, t("2026-11-03T10:00:00+02:00"))
+    check("a transfer after a missing message is trusted", lj.now(lj.accounts.first()).balance == 300.0, lj.now(lj.accounts.first()).balance)
+
     // ---- the transfer by USSD code (Ussd.kt) ----
     val to = "01012345678"
     check("code default", Ussd.code(null, to, 500) == "*9*7*01012345678*500#", Ussd.code(null, to, 500))

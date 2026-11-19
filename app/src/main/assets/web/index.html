@@ -146,7 +146,7 @@ var VIEW = !!(B && B.viewOnly);
 if (VIEW) document.documentElement.classList.add('view');
 if (!B) {
   var mock = {
-    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:true, notifOk:true, watch:true, notes:{line:false,watch:3,tx:0,limits:4},hold:{n:3,at:Date.now()-120000,gap:33928000,best:0,proven:1200000,held:true,missAt:Date.now()-120000,missLag:511000,tr:true}, smsApp:{on:false,can:true,at:0,unread:0}, listen:{on:false,live:false,at:0}, xfer:{perm:false,phone:false,acc:false,ready:false,remote:false,code:'*9*7*{n}*{a}#',def:'*9*7*{n}*{a}#',busy:false,line:'off',accounts:[{w:'vfs3',label:'فودافون كاش',own:'01005174644',can:8713.7,bal:8713.7}],list:[{id:'a1',to:'01011112222',a:500,from:'iphone',w:'vfs3',st:'ok',msg:'تم تحويل 500 جنيه لرقم 01011112222 بنجاح. رصيدك الحالي 8213.70',at:Date.now()-3600000,up:Date.now()-3500000}]}, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
+    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:true, notifOk:true, watch:true, notes:{line:false,watch:3,tx:0,limits:4},hold:{n:3,at:Date.now()-120000,gap:33928000,best:0,proven:1200000,held:true,missAt:Date.now()-120000,missLag:511000,tr:true}, smsApp:{on:false,can:true,at:0,unread:0}, listen:{on:false,live:false,at:0}, xfer:{perm:false,phone:false,acc:false,ready:false,remote:false,code:'*9*7*{n}*{a}#',def:'*9*7*{n}*{a}#',busy:false,line:'off',accounts:[{w:'vfs3',label:'فودافون كاش – خط 1',n:'1',own:'01005174644',can:8713.7,bal:8713.7},{w:'vfs5',label:'فودافون كاش – خط 2',n:'2',own:'01064063446',can:1250,bal:1250}],list:[{id:'a1',to:'01011112222',a:500,from:'iphone',w:'vfs3',st:'ok',msg:'تم تحويل 500 جنيه لرقم 01011112222 بنجاح. رصيدك الحالي 8213.70',at:Date.now()-3600000,up:Date.now()-3500000}]}, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
     settings:{monthReceive:200000,monthSend:200000,daySend:60000,dayReceiveOn:false,dayReceive:60000,feesCount:true},
     update:{available:true,version:'2'},
     months:['2026-10'],
@@ -414,6 +414,7 @@ function limitsScreen(){
     '<div class="row" style="font-weight:700;color:var(--bad-ink)"><span>متقفل للشهر الجاي</span><span class="num">'+fmt(n.locked)+'</span></div>'+
   '</div>';
 
+  if (xferShow() && (X().accounts||[]).some(function(a){return a.w===n.w})) h+='<button class="btn main" data-act="xfer" data-w="'+esc(n.w)+'">حوّل من المحفظة دي</button>';
   h+='<div class="card col" style="gap:8px;font-size:14px;line-height:1.7"><h2>التنبيهات اللي هتجيلك</h2>'+
     '<span>• لما الاستلام يعدّي '+fmt(st.monthReceive*0.75)+': فاضلك كام تستلم</span>'+
     '<span>• لما تقفل حد الاستلام</span>'+
@@ -623,10 +624,11 @@ function xferRows(list){
     var st=XST[x.st]||XST.fail;
     return '<div class="tx" style="align-items:flex-start"><div class="dot" style="background:#ECEDE9;color:'+st[2]+';font-weight:700">'+st[0]+'</div>'+
       '<div class="mid"><span class="who"><span class="num">'+fmt(x.a)+'</span> ج لـ <span class="num">'+esc(x.to)+'</span></span>'+
-      '<span class="xs" style="color:'+st[2]+';font-weight:600">'+st[1]+(x.from==='iphone'?' · من الآيفون':'')+' · '+whenF(x.up||x.at)+'</span>'+
+      '<span class="xs" style="color:'+st[2]+';font-weight:600">'+st[1]+xferLineOf(x.w)+(x.from==='iphone'?' · من الآيفون':'')+' · '+whenF(x.up||x.at)+'</span>'+
       (x.msg?'<span class="xs mute" style="line-height:1.6;white-space:normal">'+esc(x.msg)+'</span>':'')+'</div></div>';
   }).join('');
 }
+function xferLineOf(w){ var a=X().accounts||[], n=a.filter(function(x){return x.w===w})[0]; return a.length>1 && n && n.n ? ' · من خط '+esc(n.n) : ''; }
 function xferRecent(){
   if (!xferCan()) return '';
   var now=Date.now(), list=(X().list||[]).filter(function(x){return now-(x.up||x.at)<3*86400000}).slice(0,4);
@@ -680,12 +682,11 @@ function xferSheet(){
     if (!x.ready) h+='<div class="alert mid"><b>الأندرويد لسه محتاج إعداد</b><span style="line-height:1.7">على الأندرويد: الإعدادات ← «التحويل من التطبيق ومن الآيفون»، واسمح بالمكالمات وشغّل «التحويل التلقائي».</span></div>';
   } else if (!x.ready) h+='<div class="alert mid"><b>قبل أول تحويل</b>'+xferSteps()+'</div>';
   if (S.xfAsk) {
-    h+='<div class="card col" style="gap:6px;font-size:16px;line-height:1.8"><span>هيتحوّل <b class="num">'+fmt(+f.a)+'</b> ج</span><span>لـ <b class="num">'+esc(f.to)+'</b></span><span class="small mute">من '+esc(acc.label)+(acc.own?' <span class="num">'+esc(acc.own)+'</span>':'')+'. الرسوم بتتخصم من المحفظة زي العادي.</span></div>'+
+    h+='<div class="card col" style="gap:6px;font-size:16px;line-height:1.8"><span>هيتحوّل <b class="num">'+fmt(+f.a)+'</b> ج</span><span>لـ <b class="num">'+esc(f.to)+'</b></span><span>من <b>'+esc(xferLineName(acc))+'</b>'+(acc.own?' <span class="num">'+esc(acc.own)+'</span>':'')+'</span><span class="small mute">الرسوم بتتخصم من المحفظة دي زي العادي.</span></div>'+
       '<div class="grid2"><button class="btn main" data-act="xgo" id="xgo">أيوه حوّل</button><button class="btn ghost" data-act="xback">رجوع</button></div>';
     openSheet(h); return;
   }
-  if (accs.length>1) h+='<div class="field"><label for="xf_w">من</label><select id="xf_w" class="pill" style="width:100%;text-align:right;min-height:48px;border-radius:10px">'+
-    accs.map(function(n){return '<option value="'+esc(n.w)+'"'+(n.w===acc.w?' selected':'')+'>'+esc(n.label)+(n.own?' · '+esc(n.own):'')+'</option>'}).join('')+'</select></div>';
+  h+=xferPick(accs, acc);
   h+='<div class="field"><label for="xf_to">الرقم</label><input type="tel" id="xf_to" class="num" dir="ltr" style="text-align:left" placeholder="01xxxxxxxxx" autocomplete="off" value="'+esc(f.to||'')+'"></div>'+
     '<div class="field"><label for="xf_a">المبلغ (جنيه)</label><input type="number" id="xf_a" class="num" inputmode="numeric" style="text-align:right" value="'+esc(f.a||'')+'"></div>'+
     (acc.can!=null?'<span class="xs mute">تقدر تحوّل دلوقتي <span class="num">'+fmt(acc.can)+'</span> ج من '+esc(acc.label)+'</span>':'')+
@@ -695,9 +696,21 @@ function xferSheet(){
     (!VIEW&&!x.ready?'<button class="btn ghost" data-act="xdial">أو اطلب الكود واكتب الرقم السري بنفسك</button>':'');
   openSheet(h);
 }
+/* which line: "خط 1" when the phone has two Vodafone Cash wallets, else the wallet's name */
+function xferLineName(a){ var n=(X().accounts||[]).length>1 && a.n ? 'خط '+a.n : ''; return n ? 'فودافون كاش · '+n : a.label; }
+function xferPick(accs, acc){
+  if (accs.length<2) return '<span class="small mute">من '+esc(acc.label)+(acc.own?' <span class="num">'+esc(acc.own)+'</span>':'')+'</span>';
+  return '<div class="field"><label>هتحوّل من أنهي خط؟</label><div class="grid2">'+accs.map(function(n){
+    return '<button class="wcard'+(n.w===acc.w?' sel':'')+'" data-act="xacc" data-w="'+esc(n.w)+'" aria-pressed="'+(n.w===acc.w)+'">'+
+      '<b style="font-size:16px">'+(n.n?'خط '+esc(n.n):esc(n.label))+'</b>'+
+      (n.own?'<span class="xs mute num" style="text-align:right">'+esc(n.own)+'</span>':'')+
+      (n.bal!=null?'<span class="small num" style="text-align:right">'+fmt2(n.bal)+'</span>':'')+
+      (n.can!=null?'<span class="can">يحوّل دلوقتي '+fmt(n.can)+'</span>':'')+'</button>';
+  }).join('')+'</div></div>';
+}
 function xferRead(){
   var g=function(id){var e=document.getElementById(id); return e?e.value.trim():'';};
-  var acc=xferAcc(), w=g('xf_w')||(acc&&acc.w);
+  var acc=xferAcc(), w=acc&&acc.w;
   S.xf={w:w, to:g('xf_to'), a:g('xf_a'), pin:digits(g('xf_pin'))};
   return S.xf;
 }
@@ -910,7 +923,13 @@ document.addEventListener('click', function(e){
     case 'noteacc': S.noteTried=true; if (B.openNoteAccess) B.openNoteAccess(); break;
     case 'callperm': if (B.askCallPerm) B.askCallPerm(); break;
     case 'accset': S.accTried=true; if (B.openAccessibility) B.openAccessibility(); break;
-    case 'xfer': S.xfAsk=false; S.xf=S.xf&&S.xf.w?{w:S.xf.w}:null; xferSheet(); break;
+    case 'xfer':
+      S.xfAsk=false;
+      // from a wallet's screen, or with one wallet picked on the home screen: that wallet's line
+      var pre=el.dataset.w || (S.screen==='home' && S.filter!=='all' ? S.filter : '');
+      if (!(X().accounts||[]).some(function(n){return n.w===pre})) pre=S.xf&&S.xf.w;
+      S.xf=pre?{w:pre}:null; xferSheet(); break;
+    case 'xacc': xferRead(); S.xf.w=el.dataset.w; xferSheet(); break;
     case 'xnext':
       var xf=xferRead(), bad=xferCheck(xf);
       if (bad) { toast(bad); break; }

@@ -135,7 +135,9 @@ class Ledger(
 
         // 1) the user's word, 2) learned message shapes, 3) balance arithmetic
         val lastBalance = HashMap<String, Double>()
-        for (p in parsed) {
+        val checked = ArrayList<Parsed>(parsed.size)
+        for (p0 in parsed) {
+            var p = p0
             val ak = account(p).key
             val o = learned.overrides[p.sms.id]
             if (o != null) {
@@ -155,8 +157,12 @@ class Ledger(
                 }
             }
             if (p.kind.isBlank()) p.kind = when (p.type) { TxType.IN -> "وارد"; TxType.OUT -> "صادر"; else -> "" }
+            // a balance that can't be this wallet's is dropped, so the wallet keeps its real one
+            if (p.balance != null && !balanceFits(p, lastBalance[ak])) p = p.copy(balance = null)
             p.balance?.let { lastBalance[ak] = it }
+            checked += p
         }
+        parsed = checked
         all = parsed
         txs = parsed.filter { it.type == TxType.IN || it.type == TxType.OUT }
         unknown = parsed.filter { it.type == TxType.UNKNOWN }
@@ -176,6 +182,24 @@ class Ledger(
     fun limitsFor(a: Account): Limits = accountLimits[a.key] ?: limits
 
     fun account(p: Parsed): Account = accountOf[p.sms.id] ?: Account(p.wallet, "")
+
+    /**
+     * Can [p]'s balance follow the wallet's last one ([prev])? It fits when the numbers add up. When they don't:
+     * a balance equal to the message's own amount (or fee) while the wallet had more is the parser taking the
+     * price for the balance (a 52 pound bundle showed the wallet at 52 instead of 10,000); and a message that
+     * isn't a transfer (an offer, a bundle, a failed transfer) doesn't get to change the balance. A transfer
+     * whose balance jumps is trusted: a message in between is missing (deleted, or came on another phone).
+     */
+    private fun balanceFits(p: Parsed, prev: Double?): Boolean {
+        val b = p.balance ?: return true
+        if (b < 0) return false
+        if (prev == null) return true
+        val a = p.amount ?: 0.0
+        fun near(x: Double) = kotlin.math.abs(x - b) < 0.011
+        if (near(prev) || near(prev + a) || near(prev - a) || near(prev - a - p.fee)) return true
+        if (a > 0 && (near(a) || (p.fee > 0 && near(p.fee))) && prev > a + 1) return false
+        return p.type == TxType.IN || p.type == TxType.OUT
+    }
 
     fun accountLabel(a: Account): String {
         learned.accountNames[a.key]?.takeIf { it.isNotBlank() }?.let { return it }

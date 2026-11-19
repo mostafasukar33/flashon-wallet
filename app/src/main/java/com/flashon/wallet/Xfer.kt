@@ -97,18 +97,23 @@ object Xfer {
     fun json(ctx: Context, store: Store, ledger: com.flashon.wallet.core.Ledger? = null): JSONObject {
         val led = ledger ?: store.ledger()
         val accs = JSONArray()
-        for (a in led.accounts) if (a.wallet == Wallet.VODAFONE) {
+        // each Vodafone Cash wallet with its SIM line ("1", "2"), line 1 first: the transfer screen picks one
+        for (a in vfAccounts(led)) {
             val n = led.now(a)
             accs.put(JSONObject().put("w", a.key).put("label", led.accountLabel(a)).put("own", n.ownNumber ?: JSONObject.NULL)
+                .put("n", if (a.line.isBlank()) "" else led.lineNumber(a.line))
                 .put("can", n.canSendNow).put("bal", n.balance ?: JSONObject.NULL))
         }
         val j = job
-        val perm = callPerm(ctx)
+        val perm = callPerm(ctx) && phonePerm(ctx)
         val acc = accOn(ctx)
         return JSONObject().put("perm", perm).put("phone", phonePerm(ctx)).put("acc", acc).put("ready", perm && acc)
             .put("remote", remoteOn(store)).put("code", template(store)).put("def", Ussd.DEFAULT_VF)
             .put("busy", j != null && !j.done).put("line", Remote.state).put("accounts", accs).put("list", history(store))
     }
+
+    private fun vfAccounts(led: com.flashon.wallet.core.Ledger) =
+        led.accounts.filter { it.wallet == Wallet.VODAFONE }.sortedWith(compareBy(com.flashon.wallet.core.LINE_ORDER) { it.line })
 
     // ---------- the last transfers ----------
 
@@ -140,16 +145,24 @@ object Xfer {
         val store = Store(app)
         val to = Ussd.mobile(toRaw)
         val amount = Ussd.amount(amountRaw)
+        // which wallet: the one picked (by its line); with one Vodafone Cash wallet, that one
+        val accs = try { vfAccounts(store.ledger()).map { it.key } } catch (_: Exception) { emptyList() }
+        val acct = if (account in accs) account else if (accs.size == 1) accs[0] else null
+        val line = acct?.removePrefix(Wallet.VODAFONE.key) ?: ""
+        val sub = if (acct != null && phonePerm(app)) subFor(app, store, acct) else -1
         val why = when {
             to == null -> "الرقم مش رقم موبايل مصري صح"
             amount == null -> "المبلغ لازم يكون جنيهات صحيحة من 1 لـ ${Notifier.fmt(Ussd.MAX_AMOUNT.toDouble())}"
             !Ussd.pinOk(pin) -> "الرقم السري لازم يكون أرقام بس"
             !callPerm(app) -> "«محافظي» محتاج إذن المكالمات على الأندرويد علشان يطلب الكود"
+            !phonePerm(app) -> "«محافظي» محتاج إذن الهاتف على الأندرويد علشان يختار خط المحفظة"
             !accOn(app) -> "«التحويل التلقائي» مقفول في إمكانية الوصول على الأندرويد"
+            acct == null -> if (accs.isEmpty()) "مفيش محفظة فودافون كاش على الموبايل ده" else "اختار الخط اللي هتحوّل منه"
+            line.isNotBlank() && sub < 0 -> "مش لاقي شريحة المحفظة دي في الموبايل دلوقتي، فمش هحوّل من خط تاني"
             Ussd.code(template(store), to, amount) == null -> "كود التحويل في الإعدادات مش مظبوط"
             else -> null
         }
-        val base = JSONObject().put("to", to ?: toRaw.take(20)).put("a", amount ?: (amountRaw.toLongOrNull() ?: 0)).put("from", from).put("w", account)
+        val base = JSONObject().put("to", to ?: toRaw.take(20)).put("a", amount ?: (amountRaw.toLongOrNull() ?: 0)).put("from", from).put("w", acct ?: account)
         if (why != null) { finishEarly(app, store, id, base, why); return why }
         val code = Ussd.code(template(store), to!!, amount!!)!!
         val j: Job
@@ -162,7 +175,7 @@ object Xfer {
                 }
                 cur.done = true; cur.wipe()
             }
-            j = Job(id, to, amount, pin, code, subFor(app, store, account), from, account)
+            j = Job(id, to, amount, pin, code, sub, from, acct!!)
             job = j
         }
         record(store, id, base.put("st", "run").put("msg", ""))
@@ -199,7 +212,12 @@ object Xfer {
         try {
             val tm = ctx.getSystemService(TelecomManager::class.java)
             val extras = Bundle()
-            handleFor(ctx, j.sub)?.let { extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it) }
+            val h = handleFor(ctx, j.sub)
+            if (h != null) extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, h)
+            else if (j.sub >= 0 && (try { tm.callCapablePhoneAccounts.size } catch (_: Exception) { 2 }) > 1) {
+                // two SIMs and this one couldn't be picked: never let the phone dial it on the other line
+                end(ctx.applicationContext, j, "fail", "مقدرتش أختار خط المحفظة دي للاتصال، فمش هحوّل من خط تاني"); return
+            }
             tm.placeCall(Uri.fromParts("tel", j.code, null), extras)
         } catch (e: Exception) {
             end(ctx.applicationContext, j, "fail", if (e is SecurityException) "«محافظي» محتاج إذن المكالمات" else "مقدرتش أطلب الكود (${e.javaClass.simpleName})")

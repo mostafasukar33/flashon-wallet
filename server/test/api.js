@@ -25,7 +25,7 @@ const sample = (balance) => ({ t: Date.now() - 120000, data: {
   summaries: {'2026-11': {vf: {inTotal: 7000, outTotal: 500, fees: 0, count: 2, start: 0, end: balance, received: 7000, sent: 500}}},
   txs: [{id: 'a1', w: 'vf', p: 'vf', type: 'in', kind: 'استلام', amount: 7000, fee: 0, balance, phone: '01011112222', name: 'تجربة', smsName: 'تجربة', time: Date.now() - 3600000, how: 'words'}],
   unknown: [], bodies: {a1: 'رسالة تجربة: تم استلام مبلغ 7000 جنيه'},
-  xfer: {ready: true, remote: true, busy: false, accounts: [{w: 'vfs3', label: 'فودافون كاش', own: '01000000000', can: balance, bal: balance}], list: []}
+  xfer: {ready: true, remote: true, busy: false, accounts: [{w: 'vfs3', label: 'فودافون كاش – خط 1', n: '1', own: '01000000000', can: balance, bal: balance}, {w: 'vfs5', label: 'فودافون كاش – خط 2', n: '2', own: '01000000001', can: 900, bal: 900}], list: []}
 }});
 
 /* طلب التحويل من الآيفون: نفس view.html (نسخة 3، ومربوط بالاستخدام ده) */
@@ -218,21 +218,25 @@ function wsOpen(port, path, tok) {
     eq('زرار التحويل ظاهر على الآيفون', await pg.isVisible('[data-act=xfer]'), true);
     await pg.click('[data-act=xfer]'); await pg.waitForTimeout(400);
     eq('بيقول إن الأندرويد متصل', (await pg.innerText('#sheet')).includes('الأندرويد متصل دلوقتي'), true);
-    await pg.fill('#xf_to', '٠١٠ ١٢٣٤ ٥٦٧٨'); await pg.fill('#xf_a', '750'); await pg.fill('#xf_pin', '654321');
+    eq('بيختار الخط اللي هيحوّل منه', await pg.locator('#sheet [data-act=xacc]').count(), 2);
+    await pg.fill('#xf_to', '٠١٠ ١٢٣٤ ٥٦٧٨'); await pg.fill('#xf_a', '750');
+    await pg.click('#sheet [data-act=xacc][data-w=vfs5]'); await pg.waitForTimeout(200);
+    eq('… ومبيمسحش اللي اتكتب', await pg.inputValue('#xf_to'), '٠١٠ ١٢٣٤ ٥٦٧٨');
+    await pg.fill('#xf_pin', '654321');
     await pg.click('[data-act=xnext]'); await pg.waitForTimeout(300);
-    eq('بيأكد الرقم والمبلغ قبل ما يبعت', /750[\s\S]*01012345678/.test(await pg.innerText('#sheet')), true);
+    eq('بيأكد الرقم والمبلغ والخط قبل ما يبعت', /750[\s\S]*01012345678[\s\S]*خط 2/.test(await pg.innerText('#sheet')), true);
     await pg.screenshot({path: (process.env.SHOT || '/tmp/wallet') + '-xfer.png'});
     await pg.click('[data-act=xgo]');
     eq('الأندرويد سمع الطلب', await ws2.next().catch(e => e.message), 'cmd');
     const l2 = await (await fetch(C, {headers: phone()})).json();
     const c2 = l2.cmds.length && openCmd(L.key, Buffer.from(l2.cmds[l2.cmds.length - 1].b, 'base64url'));
-    eq('الطلب اتفتح على الأندرويد صح', c2 && [c2.k, c2.to, c2.a, c2.pin, c2.w].join('/'), 'xfer/01012345678/750/654321/vfs3');
+    eq('الطلب اتفتح على الأندرويد صح', c2 && [c2.k, c2.to, c2.a, c2.pin, c2.w].join('/'), 'xfer/01012345678/750/654321/vfs5');
     eq('… وجديد', c2 && Math.abs(Date.now() - c2.t) < 60000, true);
     await pg.waitForFunction(() => document.body.innerText.includes('اتبعت للأندرويد'), null, {timeout: 5000}).catch(() => {});
     eq('الآيفون بيعرض إنه اتبعت', (await pg.innerText('body')).includes('اتبعت للأندرويد'), true);
     eq('الرقم السري مش محفوظ على الآيفون', await pg.evaluate(() => JSON.stringify(localStorage).includes('654321')), false);
     // الأندرويد خلّص ورفع النتيجة
-    const done = sample(8713.7); done.data.xfer.list = [{id: c2.id, to: '01012345678', a: 750, from: 'iphone', w: 'vfs3', st: 'ok', msg: 'تم تحويل 750 جنيه بنجاح', at: Date.now(), up: Date.now()}];
+    const done = sample(8713.7); done.data.xfer.list = [{id: c2.id, to: '01012345678', a: 750, from: 'iphone', w: 'vfs5', st: 'ok', msg: 'تم تحويل 750 جنيه بنجاح', at: Date.now(), up: Date.now()}];
     await fetch(S, {method: 'PUT', headers: phone(), body: seal(L.key, 1, zlib.gzipSync(Buffer.from(JSON.stringify(done))))});
     await pg.evaluate(() => App.reload());
     await pg.waitForFunction(() => document.body.innerText.includes('اتحوّل'), null, {timeout: 8000}).catch(() => {});
