@@ -92,6 +92,13 @@
             android:noHistory="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- «شاشة البيت»: screen on (black, lowest brightness) while charging, so the phone never freezes the app (Remote.kt) -->
+        <activity
+            android:name=".StandbyActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+
         <receiver
             android:name=".Beat"
             android:exported="false" />

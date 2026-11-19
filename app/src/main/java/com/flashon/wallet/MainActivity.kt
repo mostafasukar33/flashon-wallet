@@ -582,6 +582,10 @@ class MainActivity : Activity() {
             }.start()
         }
 
+        /** «شاشة البيت»: the screen stays on (black, lowest brightness) while charging, so the phone never freezes the app. */
+        @JavascriptInterface
+        fun openStandby() { main.post { try { startActivity(Intent(this@MainActivity, StandbyActivity::class.java)) } catch (_: Exception) { } } }
+
         /** Transfers asked from the iPhone: on or off (needs the link on). */
         @JavascriptInterface
         fun setXferRemote(on: Boolean) {
