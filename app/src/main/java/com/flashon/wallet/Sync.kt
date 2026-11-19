@@ -217,7 +217,7 @@ object Sync {
             // the other phone only looks: drop what belongs to this phone alone
             o.remove("sync"); o.remove("update"); o.remove("batteryOk"); o.remove("watch"); o.remove("notifOk"); o.remove("hold"); o.remove("notes"); o.remove("smsApp"); o.remove("listen")
             // transfers: the iPhone needs the wallets, whether this phone is ready, and the list; not the code or the permissions
-            o.optJSONObject("xfer")?.let { x -> for (k in listOf("perm", "phone", "acc", "code", "def", "line")) x.remove(k) }
+            o.optJSONObject("xfer")?.let { x -> for (k in listOf("perm", "phone", "acc", "code", "def", "line", "lk", "sec")) x.remove(k) }
             // full message text, so opening a transaction there shows the SMS too
             val ids = HashSet<String>()
             val txs = o.optJSONArray("txs")

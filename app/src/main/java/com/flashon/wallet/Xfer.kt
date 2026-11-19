@@ -69,6 +69,8 @@ object Xfer {
         @Volatile var timed = false
         /** Waiting for the phone locked with a password to be opened before dialing. */
         @Volatile var waitOpen = false
+        /** The saved lock PIN was typed on the lock screen for it (once per transfer). */
+        @Volatile var unlockTried = false
         @Volatile var seen = false
         @Volatile var done = false
         @Volatile var last = ""
@@ -129,6 +131,7 @@ object Xfer {
         val acc = accOn(ctx)
         return JSONObject().put("perm", perm).put("phone", phonePerm(ctx)).put("acc", acc).put("ready", perm && acc)
             .put("remote", remoteOn(store)).put("code", template(store)).put("def", Ussd.DEFAULT_VF)
+            .put("lk", Unlock.state(ctx)).put("sec", Unlock.secure(ctx))
             .put("busy", j != null && !j.done).put("line", Remote.state).put("smsApp", SmsApp.isDefault(ctx)).put("accounts", accs).put("list", history(store))
     }
 
@@ -250,8 +253,12 @@ object Xfer {
         if (secureLocked(app)) {
             j.waitOpen = true
             j.log("مستني الموبايل يتفتح علشان يطلب الكود (فودافون بتسأل عن الرقم السري في شاشتها بس)")
-            Thread { record(Store(app), j.id, JSONObject().put("msg", "مستني قفل شاشة الأندرويد يتفتح (بصمة أو باسورد)، ولسه مفيش حاجة اتبعتت لفودافون")); refresh(app) }.start()
+            val auto = Unlock.has(app)
+            val msg = if (auto) "بيفتح قفل شاشة الأندرويد لوحده، ولسه مفيش حاجة اتبعتت لفودافون" else "مستني قفل شاشة الأندرويد يتفتح (بصمة أو باسورد)، ولسه مفيش حاجة اتبعتت لفودافون"
+            Thread { record(Store(app), j.id, JSONObject().put("msg", msg)); refresh(app) }.start()
             waitOpen(app, j, System.currentTimeMillis())
+            // our screen asks Android for the lock screen first, then the saved lock PIN is typed on it
+            if (auto) main.postDelayed({ autoUnlock(app, j) }, 1800)
             return
         }
         j.log("بيطلب الكود بالشاشة")
@@ -272,6 +279,27 @@ object Xfer {
             return
         }
         main.postDelayed({ waitOpen(app, j, since) }, 1500)
+    }
+
+    /** Types the saved lock PIN on the lock screen (once); if the phone is still locked after it, the PIN is wiped. */
+    private fun autoUnlock(app: Context, j: Job) {
+        if (job !== j || j.done || !j.waitOpen || j.unlockTried) return
+        j.unlockTried = true
+        j.log("بيكتب رقم قفل الشاشة لوحده")
+        Unlock.type(app) { r ->
+            when (r) {
+                "typed" -> main.postDelayed({
+                    if (job === j && !j.done && j.waitOpen && secureLocked(app)) {
+                        Unlock.failed(app)
+                        j.log("كتب رقم قفل الشاشة والموبايل فضل مقفول، فاتمسح ومش هيتكتب تاني لحد ما تحفظه من جديد")
+                        Thread { record(Store(app), j.id, JSONObject().put("msg", "رقم قفل شاشة الأندرويد المحفوظ طلع غلط، افتحه بإيدك")); refresh(app) }.start()
+                        XferActivity.update()
+                    }
+                }, 6000)
+                "nokeys" -> j.log("ملقاش أزرار شاشة القفل فمكتبش حاجة، افتحه بإيدك")
+                else -> j.log("«التحويل التلقائي» مش شغال فمقدرش يفتح القفل، افتحه بإيدك")
+            }
+        }
     }
 
     /** The phone was opened (from [waitOpen], or right away from our screen's unlock prompt): dial now. */
@@ -765,7 +793,9 @@ class XferActivity : Activity() {
     fun show() {
         val j = Xfer.job ?: return
         val amt = Notifier.fmt(j.amount.toDouble())
-        text?.text = if (j.waitOpen)
+        text?.text = if (j.waitOpen && Unlock.has(this))
+            "🔓\n«محافظي» بيفتح قفل الشاشة لوحده\nعلشان يحوّل $amt ج لـ ${j.to}\n\nلسه مفيش حاجة اتبعتت لفودافون"
+        else if (j.waitOpen)
             "🔒\nافتح الموبايل (بصمة أو باسورد)\nوالتحويل هيكمل لوحده\n\n«محافظي» هيحوّل $amt ج لـ ${j.to}\nفودافون بتسأل عن الرقم السري في شاشتها، وشاشتها مبتظهرش والموبايل مقفول\n\nلسه مفيش حاجة اتبعتت لفودافون"
         else "⏳\n«محافظي» بيحوّل $amt ج لـ ${j.to}\nاستنى ثواني لحد ما فودافون ترد\n\nالشاشة دي بتقفل لوحدها لما التحويل يخلص"
     }

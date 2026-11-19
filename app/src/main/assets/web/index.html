@@ -163,7 +163,7 @@ var VIEW = !!(B && B.viewOnly);
 if (VIEW) document.documentElement.classList.add('view');
 if (!B) {
   var mock = {
-    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:true, notifOk:true, watch:true, notes:{line:false,watch:3,tx:0,limits:4},hold:{n:3,at:Date.now()-120000,gap:33928000,best:0,proven:1200000,held:true,missAt:Date.now()-120000,missLag:511000,tr:true}, smsApp:{on:false,can:true,at:0,unread:0,lines:[]}, listen:{on:false,live:false,at:0}, xfer:{perm:false,phone:false,acc:false,ready:false,remote:false,code:'*9*7*{n}*{a}#',def:'*9*7*{n}*{a}#',busy:false,line:'off',accounts:[{w:'vfs3',label:'فودافون كاش – خط 1',n:'1',own:'01005174644',can:8713.7,bal:8713.7},{w:'vfs5',label:'فودافون كاش – خط 2',n:'2',own:'01064063446',can:1250,bal:1250}],list:[{id:'a1',to:'01011112222',a:500,from:'iphone',w:'vfs3',st:'ok',msg:'تم تحويل 500 جنيه لرقم 01011112222 بنجاح. رصيدك الحالي 8213.70',at:Date.now()-3600000,up:Date.now()-3500000}]}, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
+    version:'1.0 (تجربة)', versionCode:1, permission:true, batteryOk:true, notifOk:true, watch:true, notes:{line:false,watch:3,tx:0,limits:4},hold:{n:3,at:Date.now()-120000,gap:33928000,best:0,proven:1200000,held:true,missAt:Date.now()-120000,missLag:511000,tr:true}, smsApp:{on:false,can:true,at:0,unread:0,lines:[]}, listen:{on:false,live:false,at:0}, xfer:{perm:false,phone:false,acc:false,ready:false,remote:false,code:'*9*7*{n}*{a}#',def:'*9*7*{n}*{a}#',busy:false,lk:'off',sec:true,line:'off',accounts:[{w:'vfs3',label:'فودافون كاش – خط 1',n:'1',own:'01005174644',can:8713.7,bal:8713.7},{w:'vfs5',label:'فودافون كاش – خط 2',n:'2',own:'01064063446',can:1250,bal:1250}],list:[{id:'a1',to:'01011112222',a:500,from:'iphone',w:'vfs3',st:'ok',msg:'تم تحويل 500 جنيه لرقم 01011112222 بنجاح. رصيدك الحالي 8213.70',at:Date.now()-3600000,up:Date.now()-3500000}]}, txNotify:true, lines:{}, phoneLines:[{key:'s3',n:'1',wallets:['vf'],own:['01005174644']},{key:'s5',n:'2',wallets:['vf'],own:['01064063446']}], noLine:false,
     settings:{monthReceive:200000,monthSend:200000,daySend:60000,dayReceiveOn:false,dayReceive:60000,feesCount:true},
     update:{available:true,version:'2'},
     months:['2026-10'],
@@ -207,6 +207,7 @@ if (!B) {
     openAccessibility:function(){mock.xfer.acc=true;mock.xfer.ready=mock.xfer.perm;setTimeout(App.reload,300)},
     setXferRemote:function(on){mock.xfer.remote=on;mock.xfer.line=on?'on':'off';setTimeout(App.reload,100)},
     setXferCode:function(c){mock.xfer.code=c||mock.xfer.def;setTimeout(App.reload,100);return true},
+    setLockPin:function(p){mock.xfer.lk=p?'on':'off';setTimeout(App.reload,100);return ''},
     sendXfer:function(j){var o=JSON.parse(j);setTimeout(function(){mock.xfer.list.unshift({id:'m'+Date.now(),to:o.to,a:+o.a,from:'phone',w:o.w,st:'run',msg:'',at:Date.now(),up:Date.now()});App.onXferSent(true,'');App.reload()},300)},
     dialXfer:function(){toast('بيفتح الاتصال بالكود…')},
     shareImage:function(u,n,t,save){toast(save?'اتحفظ في الصور ✓':'بيفتح المشاركة…')},
@@ -787,12 +788,24 @@ function xferSettings(){
       '<span class="xs mute" style="line-height:1.6">الطلب بيتقفل على الآيفون بنفس باسورد اللينك قبل ما يطلع، والسيرفر ميقدرش يقراه ولا يعمل طلب من عنده. يعني اللي يقدر يحوّل هو اللي معاه اللينك والباسورد والرقم السري بتاع المحفظة. الطلب اللي يتأخر أكتر من 10 دقايق مبيتنفذش.</span>';
     if (x.remote) h+=(smsOn()?'<span class="xs" style="color:var(--in);font-weight:600;line-height:1.6">✓ «محافظي» تطبيق الرسايل: الآيفون بيصحّي الموبايل ده برسالة والتحويل بيتم حتى والشاشة مقفولة.</span>':
       '<div class="alert mid"><b>4. خلّي «محافظي» تطبيق الرسايل</b><span style="line-height:1.7">الموبايل ده بيجمّد «محافظي» والشاشة مطفية، فطلب الآيفون مش هيتنفذ غير لما تفتحه. لما «محافظي» يبقى تطبيق الرسايل، الآيفون بيصحّيه برسالة ويحوّل على طول.</span><button class="btn main" data-act="fixhold">إزاي</button></div>');
+    if (x.remote && !VIEW) h+=lockBox(x);
   }
   h+='<button class="btn ghost" data-act="xfer">جرّب تحويل</button>'+
     '<details class="old"><summary>كود التحويل</summary><div class="col" style="gap:8px;margin-top:8px"><span class="xs mute" style="line-height:1.6">{n} مكان الرقم و{a} مكان المبلغ. غيّره بس لو فودافون غيّرت الكود.</span>'+
     '<input type="text" id="s_xcode" dir="ltr" class="num" style="border:1px solid var(--line2);border-radius:10px;min-height:48px;padding:0 12px;font-size:17px;background:#fff" value="'+esc(x.code)+'">'+
     '<div class="grid2"><button class="btn ghost" data-act="xcode">احفظ</button><button class="btn ghost" data-act="xcodedef">رجّع العادي</button></div></div></details>';
   return h+'</div>';
+}
+// the phone's own lock PIN: typed on the lock screen for a transfer from the iPhone (Vodafone's screen doesn't show over the lock)
+function lockBox(x){
+  var h='<div class="col" style="gap:8px;line-height:1.7;border-top:1px solid var(--line2);padding-top:10px"><b>5. افتح قفل الشاشة لوحده</b>';
+  if (!x.sec) return h+'<span class="xs mute">الموبايل ده مفيهوش قفل بباسورد، فمش محتاج.</span></div>';
+  if (x.lk==='on') return h+'<span class="xs" style="color:var(--in);font-weight:600">✓ لما طلب ييجي من الآيفون والأندرويد مقفول، «محافظي» بيكتب رقم قفل الشاشة لوحده ويحوّل.</span>'+
+    '<span class="xs mute">لو غيّرت رقم قفل الشاشة، احفظ الجديد هنا.</span><button class="btn ghost" data-act="lkoff">شيل رقم القفل</button></div>';
+  if (x.lk==='bad') h+='<div class="alert mid"><b>رقم القفل المحفوظ طلع غلط</b><span style="line-height:1.7">اتكتب والأندرويد فضل مقفول، فاتمسح علشان ميتكتبش تاني. لو غيّرت رقم قفل الشاشة، احفظ الجديد.</span></div>';
+  return h+'<span class="xs mute" style="line-height:1.6">والأندرويد مقفول بباسورد، شاشة فودافون مبتظهرش لحد ما يتفتح. اكتب هنا الـ PIN أو الباسورد بتاع <b>قفل شاشة الأندرويد</b> (مش الرقم السري بتاع المحفظة)، و«التحويل التلقائي» هيكتبه على شاشة القفل وقت تحويل جاي من الآيفون بس. بيتحفظ مقفول جوه الموبايل ده بس، ومبيروحش للآيفون ولا للسيرفر. لو قفلك رسمة '+en('Pattern')+' مش هينفع.</span>'+
+    '<input type="text" id="s_lk" dir="ltr" class="num" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="رقم قفل الشاشة" style="-webkit-text-security:disc;border:1px solid var(--line2);border-radius:10px;min-height:48px;padding:0 12px;font-size:17px;background:#fff">'+
+    '<button class="btn ghost" data-act="lkset">احفظ رقم القفل</button></div>';
 }
 function xferAcc(){
   var a=X().accounts||[]; if (!a.length) return null;
@@ -1145,6 +1158,11 @@ document.addEventListener('click', function(e){
       var xc=document.getElementById('s_xcode'); if (!xc) break;
       if (B.setXferCode && B.setXferCode(xc.value.trim())===false) toast('الكود لازم يكون فيه {n} و{a} وأرقام و* و# بس'); else toast('اتحفظ'); break;
     case 'xcodedef': if (B.setXferCode) B.setXferCode(''); toast('رجع الكود العادي'); break;
+    case 'lkset':
+      var lk=document.getElementById('s_lk'); if (!lk || !B.setLockPin) break;
+      var lw=B.setLockPin(lk.value); lk.value='';
+      toast(lw?lw:'اتحفظ ✓ هيتكتب على شاشة القفل وقت التحويل بس'); break;
+    case 'lkoff': if (B.setLockPin) B.setLockPin(''); toast('اتشال، والأندرويد لازم يتفتح بإيدك وقت التحويل'); break;
     case 'appinfo': if (B.openAppInfo) B.openAppInfo(); break;
     case 'defapps': if (B.openDefaultApps) B.openDefaultApps(); break;
     case 'sms': closeSheet(); SMS.threads=null; go('sms'); loadThreads(); break;
