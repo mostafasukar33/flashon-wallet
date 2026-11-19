@@ -77,8 +77,9 @@ object Sync {
         store.putLong("sync_ok", 0)
     }
 
-    private fun send(method: String, path: String, store: Store, body: ByteArray?): Int {
+    private fun send(method: String, path: String, store: Store, body: ByteArray?, extra: Map<String, String> = emptyMap()): Int {
         val c = URL(HOST + path).openConnection() as HttpURLConnection
+        for ((k, v) in extra) c.setRequestProperty(k, v)
         c.requestMethod = method
         c.connectTimeout = 10000; c.readTimeout = 15000
         c.setRequestProperty("Authorization", "Bearer " + (store.getStr("sync_tok") ?: ""))
@@ -103,6 +104,11 @@ object Sync {
         val sealed = cipher.doFinal(data)
         return byteArrayOf(version.toByte()) + iv + sealed
     }
+
+    /** How the last new SMS was caught (rcv/watch/box/open/job/boot) and how many seconds after it landed: only for the server log. */
+    @Volatile var via = ""
+    @Volatile var lag = 0L
+    @Volatile var diag = ""
 
     private const val PENDING_MAX_AGE = 6 * 60 * 60 * 1000L
     private val PENDING_LOCK = Any()
@@ -146,7 +152,8 @@ object Sync {
     private fun sendPush(store: Store, arr: JSONArray): Boolean {
         val id = store.getStr("sync_id") ?: return true
         return try {
-            val code = send("POST", "/api/s/$id/push", store, seal(store, 2, arr.toString().toByteArray(Charsets.UTF_8)))
+            val code = send("POST", "/api/s/$id/push", store, seal(store, 2, arr.toString().toByteArray(Charsets.UTF_8)),
+                mapOf("X-Via" to via.ifBlank { "retry" }, "X-Lag" to lag.toString(), "X-Diag" to diag))
             code in 200..299 || code == 400 || code == 403 || code == 404   // those won't get better by retrying
         } catch (_: Exception) { false }
     }

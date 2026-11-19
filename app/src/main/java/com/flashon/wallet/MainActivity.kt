@@ -86,7 +86,7 @@ class MainActivity : Activity() {
         // pick up anything missed while the app was closed, then redraw
         WatchService.start(this)
         Thread {
-            try { SmsSource.catchUp(this) } catch (_: Exception) { }   // what came while closed; the other phone hears about it too
+            try { SmsSource.catchUp(this, "open") } catch (_: Exception) { }   // what came while closed; the other phone hears about it too
             reloadUi()
             if (store.getStr("sync_pending") != null) try { Sync.flushPending(store) } catch (_: Exception) { }
             if (Updater.shouldAutoCheck(this)) { Updater.check(this); reloadUi() }

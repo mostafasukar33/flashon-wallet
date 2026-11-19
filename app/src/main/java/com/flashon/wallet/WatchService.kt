@@ -52,7 +52,7 @@ class WatchService : Service() {
     private var handler: Handler? = null
     private var receiver: BroadcastReceiver? = null
     private var observer: ContentObserver? = null
-    private val scan = Runnable { try { SmsSource.catchUp(this) } catch (_: Exception) { } }
+    private val scan = Runnable { try { SmsSource.catchUp(this, "box") } catch (_: Exception) { } }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -96,7 +96,10 @@ class WatchService : Service() {
         val r = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 val list = SmsReceiver.parse(context, intent)
-                if (list.isNotEmpty()) h.post { try { SmsSource.deliver(context, list) } catch (_: Exception) { } }
+                if (list.isEmpty()) return
+                // goAsync keeps the phone awake until the send is done (a plain post let it fall asleep first)
+                val pending = goAsync()
+                Thread { try { SmsSource.deliver(context, list, "watch") } catch (_: Exception) { } finally { pending.finish() } }.start()
             }
         }
         val f = IntentFilter(Telephony.Sms.Intents.SMS_RECEIVED_ACTION).apply { priority = 999 }
@@ -108,6 +111,7 @@ class WatchService : Service() {
         // 2) the inbox: catches it too if the SMS broadcast never came (a second later, once it is saved)
         val o = object : ContentObserver(h) {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
+                SmsSource.awake(this@WatchService, "box", 10_000L)   // stay awake for the short wait below
                 h.removeCallbacks(scan); h.postDelayed(scan, 1500)
             }
         }
@@ -152,7 +156,7 @@ class WatchJob : JobService() {
 
     override fun onStartJob(params: JobParameters): Boolean {
         Thread {
-            try { SmsSource.catchUp(this) } catch (_: Exception) { }
+            try { SmsSource.catchUp(this, "job") } catch (_: Exception) { }
             if (!WatchService.running) WatchService.start(this)
             jobFinished(params, false)
         }.start()

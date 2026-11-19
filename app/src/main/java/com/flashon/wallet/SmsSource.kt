@@ -72,8 +72,18 @@ object SmsSource {
      * [WatchService], or opening the app): the other phone first, then this phone's notification,
      * then the screens. A message that was already handled adds nothing and sends nothing. Blocking.
      */
-    fun deliver(ctx: Context, list: List<RawSms>) = synchronized(DELIVER_LOCK) {
+    fun deliver(ctx: Context, list: List<RawSms>, via: String = "") {
         if (list.isEmpty()) return
+        // the screen is off: without this the phone sleeps right after the SMS and the send waits until it's picked up
+        val wl = awake(ctx, "deliver", 90_000L)
+        try { deliverLocked(ctx, list, via) } finally { try { if (wl.isHeld) wl.release() } catch (_: Exception) { } }
+    }
+
+    fun awake(ctx: Context, tag: String, ms: Long): android.os.PowerManager.WakeLock =
+        (ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "flashon:$tag").apply { setReferenceCounted(false); acquire(ms) }
+
+    private fun deliverLocked(ctx: Context, list: List<RawSms>, via: String) = synchronized(DELIVER_LOCK) {
         val store = Store(ctx)
         val before = store.allSms().map { it.id }.toHashSet()
         if (store.addSms(list) == 0) return
@@ -81,6 +91,10 @@ object SmsSource {
         // a message older than a few hours (first read of the inbox, "read again") is not news
         val fresh = list.filter { it.id !in before && now - it.time < LATE_MAX }.distinctBy { it.id }
         if (fresh.isNotEmpty()) {
+            // how it was caught and how late (seconds), sent along so the server log shows where a delay comes from
+            Sync.via = via; Sync.lag = ((now - fresh.minOf { it.time }) / 1000).coerceAtLeast(0)
+            Sync.diag = "bat=" + (if ((ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)) 1 else 0) +
+                ";watch=" + (if (WatchService.running) 1 else 0)
             // the other phone first: read the new SMS alone and send, before the full ledger is built
             val sent = if (Sync.isOn(store)) Notifier.quick(store, fresh).also { Sync.notify(ctx, store, it) } else emptyList()
             val msgs = Notifier.announce(ctx, store, fresh.map { it.id })
@@ -93,12 +107,12 @@ object SmsSource {
     }
 
     /** The last days of the inbox, through [deliver]: catches what the SMS broadcast missed. Blocking. */
-    fun catchUp(ctx: Context) {
+    fun catchUp(ctx: Context, via: String = "box") {
         if (!hasPermission(ctx)) return
         val store = Store(ctx)
         if (store.getLong("fullScanV") < FULL_SCAN_VERSION) { scanInbox(ctx); return }
         val startedAt = System.currentTimeMillis()
-        deliver(ctx, readInbox(ctx, (store.getLong("lastScan") - 3L * 24 * 3600 * 1000).coerceAtLeast(0L)))
+        deliver(ctx, readInbox(ctx, (store.getLong("lastScan") - 3L * 24 * 3600 * 1000).coerceAtLeast(0L)), via)
         store.putLong("lastScan", startedAt)
     }
 
@@ -121,7 +135,7 @@ class SmsReceiver : BroadcastReceiver() {
         if (list.isEmpty()) return
         val pending = goAsync()
         Thread {
-            try { SmsSource.deliver(context, list) } catch (_: Exception) { } finally { pending.finish() }
+            try { SmsSource.deliver(context, list, "rcv") } catch (_: Exception) { } finally { pending.finish() }
         }.start()
         WatchService.start(context)   // the receiver ran but the watcher was stopped: start it again
     }

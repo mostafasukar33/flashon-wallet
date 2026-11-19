@@ -209,7 +209,7 @@ class MonthReceiver : BroadcastReceiver() {
             try {
                 if (intent.action == ACTION) Notifier.monthStarted(context)
                 Notifier.scheduleMonthStart(context)
-                if (intent.action != ACTION) { WatchService.start(context); SmsSource.catchUp(context) }   // after a restart or an update
+                if (intent.action != ACTION) { WatchService.start(context); SmsSource.catchUp(context, "boot") }   // after a restart or an update
             } catch (_: Exception) {
             } finally { pending.finish() }
         }.start()

@@ -156,16 +156,19 @@ export class Box extends DurableObject {
       const body = new Uint8Array(await req.arrayBuffer());
       if (body.length < 30 || body.length > 3000 || body[0] !== 2) return json({ error: 'bad' }, 400);
       const subs = this.sql.exec('SELECT endpoint, p256dh, auth FROM sub').toArray();
-      let sent = 0;
+      let sent = 0; const codes = [];
       await Promise.all(subs.map(async s => {
         try {
           const r = await fetch(s.endpoint, { method: 'POST', body: await encryptPush(body, s.p256dh, s.auth), headers: {
             'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: '86400', Urgency: 'high',
             Authorization: await vapid(this.env, s.endpoint) } });
+          codes.push(r.status);
           if (r.status === 404 || r.status === 410) this.sql.exec('DELETE FROM sub WHERE endpoint=?', s.endpoint);
           else if (r.ok) sent++;
-        } catch { }
+        } catch { codes.push(0); }
       }));
+      // the log only: how the Android caught the SMS, how many seconds late, and what Apple/Google answered (no content)
+      console.log('push', JSON.stringify({ via: req.headers.get('X-Via') || '', lag: +(req.headers.get('X-Lag') || 0), diag: req.headers.get('X-Diag') || '', subs: subs.length, sent, codes }));
       return json({ ok: true, sent });
     }
 
