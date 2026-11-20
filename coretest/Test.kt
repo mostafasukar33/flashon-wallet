@@ -346,6 +346,27 @@ fun main() {
         val a = g.next(pinPage, false)
         check("flow: PIN page before # was tried -> off, no PIN", a is QuietFlow.Act.Off && !g.pinSent)
     }
+    // Vodafone's real answers (trace of 20 Nov, 3:08): "*9*7#" is a menu that Android called "finished"
+    val vfMenu = "1.إدخال الرقم 2.إختيار من الأرقام الموجودة 3.أخر أرقام مستخدمة 00:رجوع"
+    val vfAgain = "برجاء إختيار رقم صحيح 1.إدخال الرقم 2.إختيار من الأرقام المحفوظة 0:مزيد"
+    check("flow: real *9*7# menu is a question", QuietFlow.isMenu(vfMenu) && !QuietFlow.isMenu(quietPage1) && !QuietFlow.isMenu(donePage))
+    run {
+        val f = QuietFlow(me, 5, false)
+        check("flow: real *9*7# menu -> «إدخال الرقم» = 1 (bare, never *9#)", sent(f.next(vfMenu, false)) == "1")
+        check("flow: the box after it -> the number with #", sent(f.next("ادخل رقم الموبايل", false)) == "$me#")
+        check("flow: then the amount with #", sent(f.next("ادخل المبلغ", false)) == "5#" && f.hashOk)
+    }
+    run {
+        val f = QuietFlow(me, 5, false)
+        check("flow: real 'choose a valid number' menu -> 1 again", sent(f.next(vfAgain, false)) == "1")
+    }
+    run {
+        val f = QuietFlow(me, 5, false)
+        f.next(vfMenu, false); f.next("برجاء إدخال الرقم", false)
+        val a = f.next("رقم 01005174644 بإسم مصطفى م*** م**** ادخل المبلغ", false)
+        check("flow: Vodafone names the number after it (# taken) -> the amount", sent(a) == "5#" && f.hashOk, a)
+    }
+    check("flow: the PIN page in the menu step = off, never the PIN", QuietFlow(me, 5, false).next(pinPage, false) is QuietFlow.Act.Off)
     check("flow: bare keys only 0-9 and 00 (a 2-digit 1x would be dialed)", QuietFlow.bare("0") == "0" && QuietFlow.bare("00") == "00" && QuietFlow.bare("10") == null && QuietFlow.bare("#") == null)
     check("flow: number / amount boxes", QuietFlow.asksNumber("من فضلك ادخل رقم الموبايل") && QuietFlow.asksAmount("ادخل المبلغ") && !QuietFlow.asksNumber(pinPage) && !QuietFlow.asksAmount(pinPage))
 

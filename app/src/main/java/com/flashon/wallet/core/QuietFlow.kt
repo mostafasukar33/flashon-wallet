@@ -43,6 +43,7 @@ class QuietFlow(val to: String, val amount: Long, hashKnown: Boolean) {
     var pinSent = false
         private set
     private var confirmSent = false
+    private var amountSent = false
     private var more = 0
     private val pages = StringBuilder()
 
@@ -54,15 +55,16 @@ class QuietFlow(val to: String, val amount: Long, hashKnown: Boolean) {
     fun next(text: String, androidAsks: Boolean): Act {
         val t = text.trim()
         if (t.isEmpty()) return if (pinSent) Act.End("unsure", "فودافون مردتش بكلام بعد الرقم السري. استنى رسالة فودافون") else Act.Off("فودافون مردتش بكلام")
-        val question = Ussd.quietAsks(t, androidAsks) || asksNumber(t) || asksAmount(t)
+        // Android on the Infinix calls every page "finished": a menu or a box is a question by its words
+        val question = Ussd.quietAsks(t, androidAsks) || asksNumber(t) || asksAmount(t) || isMenu(t)
         return when (stage) {
             Stage.MENU -> menu(t, question)
-            // the answer to the number with "#": Vodafone moved on to the amount = its boxes take "#"
+            // the answer to the number with "#": Vodafone moved on (asks the amount, or names that number) = its boxes take "#"
             Stage.NUMBER -> when {
-                asksAmount(t) && !wrong(t) -> {
+                !wrong(t) && !asksNumber(t) && (asksAmount(t) || Ussd.namesNumber(t, to)) -> {
                     hashOk = true
                     stage = Stage.AMOUNT
-                    Act.Send(Ussd.quietReply(amount.toString())!!, "كتب المبلغ بـ «#»")
+                    page(t, question)
                 }
                 Ussd.glitch(t) -> Act.Off("مشكلة في الشبكة بعد الرقم")
                 // said no, or asked for the number again: its boxes don't take "#", so the PIN never goes this way
@@ -77,11 +79,18 @@ class QuietFlow(val to: String, val amount: Long, hashKnown: Boolean) {
     fun pinDone() { pinSent = true; stage = Stage.AFTER }
 
     private fun menu(t: String, question: Boolean): Act {
+        // Vodafone's real "*9*7#": "1.إدخال الرقم 2.إختيار من الأرقام الموجودة 3.أخر أرقام مستخدمة 00:رجوع"
+        optionKey(t, ENTER_NUMBER)?.let { k ->
+            if (++menuSteps > 4) return Act.Off("قايمة فودافون بتتكرر ($t)")
+            return Act.Send(k, "اختار «إدخال الرقم» ($k)")
+        }
         if (asksNumber(t) && question) {
             stage = Stage.NUMBER
             return Act.Send(Ussd.quietReply(to)!!, "كتب الرقم بـ «#» (لو فودافون قبلته يبقى الرقم السري هيتقبل كده)")
         }
-        if (!question || wrong(t)) {
+        // a final "no" with no menu in it: the wallet's own menu once (an answer sent into an open talk would be
+        // taken as a wrong choice: "برجاء إختيار رقم صحيح")
+        if (!question && !isMenu(t)) {
             // "*9*7#" isn't a menu here: the wallet's own menu, once (the last talk ended with this answer)
             if (!triedWalletMenu) { triedWalletMenu = true; menuSteps = 0; return Act.Send(WALLET_MENU, "طلب قايمة المحفظة $WALLET_MENU") }
             return Act.Off("قايمة فودافون مش زي المتوقع ($t)")
@@ -93,6 +102,10 @@ class QuietFlow(val to: String, val amount: Long, hashKnown: Boolean) {
     }
 
     private fun page(t: String, question: Boolean): Act {
+        if (!amountSent && !pinSent && asksAmount(t) && !wrong(t)) {
+            amountSent = true
+            return Act.Send(Ussd.quietReply(amount.toString())!!, "كتب المبلغ بـ «#»")
+        }
         val step = Ussd.step(t, question, to, pinSent, confirmSent, pages.toString())
         return when (step) {
             Ussd.Step.MORE -> {
@@ -123,10 +136,13 @@ class QuietFlow(val to: String, val amount: Long, hashKnown: Boolean) {
 
         private fun rx(p: String) = Regex(Parser.fold(p), RegexOption.IGNORE_CASE)
         private val PIN_WORDS = rx("السري|السرى|\\bpin\\b|password")
-        private val NUMBER = rx("(ادخل|أدخل|اكتب|برجاء ادخال|برجاء إدخال|من فضلك ادخل)\\s*(ال)?رقم|رقم\\s*(ال)?(موبايل|محمول|هاتف|تليفون|مستلم|مستفيد|محفظه|محفظة)|enter\\s*(the\\s*)?(mobile|number|msisdn|recipient)")
-        private val AMOUNT = rx("(ادخل|أدخل|اكتب|برجاء ادخال|برجاء إدخال|من فضلك ادخل)\\s*(ال)?(مبلغ|قيمه|قيمة)|enter\\s*(the\\s*)?amount")
+        private val NUMBER = rx("(ادخل|أدخل|ادخال|إدخال|اكتب|برجاء ادخال|برجاء إدخال|من فضلك ادخل)\\s*(ال)?رقم|رقم\\s*(ال)?(موبايل|محمول|هاتف|تليفون|مستلم|مستفيد|محفظه|محفظة)|enter\\s*(the\\s*)?(mobile|number|msisdn|recipient)")
+        private val AMOUNT = rx("(ادخل|أدخل|ادخال|إدخال|اكتب|برجاء ادخال|برجاء إدخال|من فضلك ادخل)\\s*(ال)?(مبلغ|قيمه|قيمة)|enter\\s*(the\\s*)?amount")
         private val WRONG = rx("غير صحيح|خطأ|خاطئ|عفوا|نأسف|invalid|incorrect|wrong|retries|غير صالح|مرفوض|فشل|لم يتم")
         private val NOT_THIS = rx("دولي|بنك|بنكي|رصيد|كارت|فيزا|ميزه|ميزة|انستا|instapay|international|bank|card|كاش اوت|سحب")
+        /** "إدخال الرقم" / "رقم جديد": the option to type the number (not "choose from saved ones"). */
+        private val ENTER_NUMBER = rx("ادخال الرقم|إدخال الرقم|ادخل الرقم|ادخال رقم|إدخال رقم|رقم جديد|رقم اخر|رقم آخر|enter number|new number")
+        private val BACK_MORE = rx("رجوع|مزيد|المزيد|التالي|back|more|next")
         private val OPTION = Regex("(?:^|[\\s\\n])([0-9]{1,2})\\s*[-:.)]\\s*([^\\n0-9]{2,40})")
 
         private fun clean(t: String) = Parser.fold(Parser.normalize(t))
@@ -136,6 +152,15 @@ class QuietFlow(val to: String, val amount: Long, hashKnown: Boolean) {
 
         /** A menu key Android sends as USSD as it is (one digit, or "00"); anything else would be dialed as a call. */
         fun bare(k: String): String? = if (Regex("^[0-9]$").matches(k) || k == "00") k else null
+
+        /** The bare key of the menu option whose words match [what]. */
+        fun optionKey(t: String, what: Regex): String? {
+            for (m in OPTION.findAll(Parser.normalize(t))) if (what.containsMatchIn(Parser.fold(m.groupValues[2]))) bare(m.groupValues[1])?.let { return it }
+            return null
+        }
+
+        /** A choice ("1.…", besides "back" / "more"): Vodafone waits for one, whatever Android says. */
+        fun isMenu(t: String): Boolean = OPTION.findAll(Parser.normalize(t)).any { !BACK_MORE.containsMatchIn(Parser.fold(it.groupValues[2])) }
 
         /** The menu key for sending money to a wallet ("1-تحويل أموال"), not international / bank / credit. */
         fun transferKey(t: String): String? {
