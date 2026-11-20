@@ -283,6 +283,13 @@ fun main() {
     check("quiet: page 2 = the PIN", Ussd.step(pinPage, true, me, false, false, page1 + "\n") == Ussd.Step.PIN)
     check("quiet: done page = done", Ussd.step(donePage, true, me, true, false, page1 + "\n") == Ussd.Step.OK)
     check("quiet: MMI error as 'failed + words' = stop, a failure, a hiccup", Ussd.step(mmi, true, me, false, false) == Ussd.Step.STOP && Ussd.step(mmi, false, me, false, false) == Ussd.Step.FAIL && Ussd.glitch(mmi))
+    // the Infinix's real answer with no screen: Vodafone's page 1 came as "done" (Android: success, no box)
+    val quietPage1 = "لتحويل 5 ج بالإضافة لـ0 ج رسوم لرقم 01005174644 بإسم مصطفى م*** م**** 0:مزيد"
+    check("quiet: page 1 called done by Android is still a question", Ussd.quietAsks(quietPage1, false))
+    check("quiet: … and asks for the rest", Ussd.step(quietPage1, Ussd.quietAsks(quietPage1, false), me, false, false) == Ussd.Step.MORE)
+    check("quiet: the PIN page called done is a question", Ussd.quietAsks(pinPage, false))
+    check("quiet: a final answer stays final", !Ussd.quietAsks("تم تحويل 500 جنيه لرقم 01012345678 بنجاح", false) && !Ussd.quietAsks("عفواً رصيدك غير كافٍ", false))
+    check("quiet: done page with 0:مزيد = done either way", Ussd.step(donePage, Ussd.quietAsks(donePage, false), me, true, false, quietPage1) == Ussd.Step.OK)
     check("quiet: wrong PIN talks about the PIN", Ussd.mentionsPin("عفواً، الرقم السري غير صحيح") && Ussd.mentionsPin(pinPage) && !Ussd.mentionsPin(donePage) && !Ussd.mentionsPin(page1))
     check("quiet: the same PIN question again after the PIN = stop", Ussd.step(pinPage, true, me, true, false, page1) == Ussd.Step.STOP)
 

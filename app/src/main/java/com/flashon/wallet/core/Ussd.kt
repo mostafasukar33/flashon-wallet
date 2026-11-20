@@ -101,6 +101,13 @@ object Ussd {
      */
     fun quietReply(key: String?): String? = if (key != null && Regex("^[0-9*]{1,12}$").matches(key)) "$key#" else null
 
+    /**
+     * Does Vodafone wait for an answer to this page, with no screen to show a box. Android's own word for it isn't
+     * enough: on the Infinix it called Vodafone's first page ("… 0:مزيد") finished, the same page that shows a box on
+     * the screen. So a page that asks for more, the PIN or a confirmation is a question whatever Android said.
+     */
+    fun quietAsks(text: String, androidSays: Boolean): Boolean = androidSays || moreKey(text) != null || asks(text)
+
     /** The words talk about the PIN (asks it again, or says it's wrong). */
     fun mentionsPin(text: String): Boolean = PIN.containsMatchIn(clean(text))
 

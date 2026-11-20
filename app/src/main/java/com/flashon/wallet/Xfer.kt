@@ -303,7 +303,7 @@ object Xfer {
     /** Turned on again from the settings: tried anew, even after a "bad". */
     fun setQuiet(store: Store, on: Boolean) {
         store.putLong("xq_off", if (on) 0 else 1)
-        if (on) { store.putStr("xq", ""); store.putStr("xq_why", "") }
+        if (on) { store.putStr("xq", ""); store.putStr("xq_why", ""); store.putLong("xq_pf", 0) }
     }
 
     private fun quietBad(store: Store, why: String) { store.putStr("xq", "bad"); store.putStr("xq_why", why.take(300)) }
@@ -381,15 +381,21 @@ object Xfer {
             }, 3000L + 2000L * j.qRetries)
             return
         }
-        val step = Ussd.step(text, asks, j.to, j.pinSent, j.confirmSent, j.pages.toString())
+        // Android may call a page that waits for an answer "finished": Vodafone's words decide
+        val question = Ussd.quietAsks(text, asks)
+        val step = Ussd.step(text, question, j.to, j.pinSent, j.confirmSent, j.pages.toString())
         if (j.qProbe) {
             j.qProbe = false
             // the first answer sent with "#" after it: Vodafone moved on to a new page = it takes answers this way
             val movedOn = text != j.qPrev && step in setOf(Ussd.Step.PIN, Ussd.Step.MORE, Ussd.Step.CONFIRM, Ussd.Step.OK)
             if (!movedOn) {
-                if (!Ussd.glitch(text)) quietBad(store, "فودافون مقبلتش الرد من غير شاشة: $text")
+                // a network hiccup to the reply: tried again on the next transfers, three times in a row = not again
+                val tries = if (Ussd.glitch(text)) store.getLong("xq_pf") + 1 else 99L
+                store.putLong("xq_pf", tries)
+                if (tries >= 3) quietBad(store, "فودافون مقبلتش الرد من غير شاشة: $text")
                 qOff(app, j, "فودافون مقبلتش الرد من غير شاشة"); return
             }
+            store.putLong("xq_pf", 0)
             if (quietState(store) != "ok") { store.putStr("xq", "ok"); store.putStr("xq_why", "") }
         }
         j.qPrev = text
@@ -416,7 +422,7 @@ object Xfer {
                 if (!qSend(app, j, Ussd.quietReply("1")!!, "أكد بـ 1 من غير شاشة")) qOff(app, j, "مقدرش يرد من غير شاشة")
             }
             Ussd.Step.OK -> end(app, j, "ok", text)
-            Ussd.Step.UNSURE, Ussd.Step.WAIT -> if (j.pinSent) end(app, j, "unsure", text) else qOff(app, j, "رد فودافون من غير شاشة مش واضح")
+            Ussd.Step.UNSURE, Ussd.Step.WAIT -> if (j.pinSent) end(app, j, "unsure", text) else qOff(app, j, "رد فودافون من غير شاشة مش واضح (${if (asks) "سؤال" else "خلص"})")
             Ussd.Step.FAIL, Ussd.Step.STOP -> {
                 val failed = step == Ussd.Step.FAIL || Ussd.step(text, false, j.to, j.pinSent, j.confirmSent) == Ussd.Step.FAIL
                 when {
