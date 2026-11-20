@@ -49,7 +49,7 @@ object Quiet {
             if (m == null) { why = "خدمة الهاتف مختلفة على الموبايل ده"; return false }
             m.isAccessible = true
             tel = t; call = m
-        } catch (e: Throwable) { why = e.javaClass.simpleName }
+        } catch (e: Throwable) { why = said(e) }
         return call != null
     }
 
@@ -68,6 +68,12 @@ object Quiet {
                 done(code != SUCCESS, text)
             }
         }
-        return try { m.invoke(tel, sub, s, rr); true } catch (_: Throwable) { false }
+        return try { m.invoke(tel, sub, s, rr); true } catch (e: Throwable) { why = said(e); false }
+    }
+
+    /** What went wrong, short: the real error under a reflection wrapper. */
+    private fun said(e: Throwable): String {
+        val c = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e.cause ?: e
+        return (c.javaClass.simpleName + (c.message?.let { ": $it" } ?: "")).take(160)
     }
 }

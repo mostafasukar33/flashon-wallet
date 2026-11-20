@@ -813,6 +813,7 @@ function quietBox(x){
   if (!x.sec) return h+'<span class="xs mute">الموبايل ده مفيهوش قفل بباسورد، فالتحويل بيتم بشاشة فودافون العادية.</span></div>';
   h+='<span class="xs mute" style="line-height:1.6">والأندرويد مقفول بباسورد، شاشة فودافون مبتظهرش. فـ«محافظي» بيكلّم فودافون في الخلفية من غير أي شاشة ومن غير ما يفتح القفل: بيطلب الكود، ويقرا ردها، ويبعت الرقم السري. الباسورد بتاع الموبايل بيفضل زي ما هو.</span>';
   if (x.xqOn===false) return h+'</div>';
+  if (x.xqReady===false) return h+'<div class="alert mid"><b>الموبايل ده مش سامح بالطريقة دي</b><span style="line-height:1.7">«محافظي» مقدرش يوصل لخدمة الهاتف في الخلفية'+(x.xqErr?' ('+esc(x.xqErr)+')':'')+'، فالتحويل والأندرويد مقفول هيستنى يتفتح.</span></div></div>';
   if (x.xq==='ok') h+='<span class="xs" style="color:var(--in);font-weight:600">✓ اتجربت على الموبايل ده وفودافون قبلتها.</span>';
   else if (x.xq==='bad') h+='<div class="alert mid"><b>فودافون مقبلتهاش على الموبايل ده</b><span style="line-height:1.7">'+esc(x.xqWhy||'')+'</span><span class="xs">لو عايز تجرّبها تاني: اقفل المفتاح وافتحه.</span></div>';
   else h+='<span class="xs" style="color:var(--day);font-weight:600;line-height:1.6">لسه هتتجرب أول تحويل والأندرويد مقفول. قبل الرقم السري بيتأكد إن فودافون بتقبل الرد بالطريقة دي، ولو مقبلتش بيستنى الموبايل يتفتح زي الأول.</span>';

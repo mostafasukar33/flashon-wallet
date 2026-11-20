@@ -83,6 +83,8 @@ object Xfer {
         /** The reply just sent is the first one with "#" after it on this phone: does Vodafone take it. */
         @Volatile var qProbe = false
         @Volatile var qPrev = ""
+        /** Why the talk with no screen didn't go (or didn't start), told to the iPhone right away. */
+        @Volatile var qWhy = ""
         @Volatile var last = ""
         @Volatile var lastNote = ""
         /** The pages already read of a message Vodafone cut in pages ("… 0:مزيد"), and how many. */
@@ -142,7 +144,8 @@ object Xfer {
         return JSONObject().put("perm", perm).put("phone", phonePerm(ctx)).put("acc", acc).put("ready", perm && acc)
             .put("remote", remoteOn(store)).put("code", template(store)).put("def", Ussd.DEFAULT_VF)
             .put("lk", Unlock.state(ctx)).put("sec", Unlock.secure(ctx))
-            .put("xq", quietState(store)).put("xqOn", quietOn(store)).put("xqWhy", store.getStr("xq_why") ?: "")
+            .put("xq", quietState(store)).put("xqOn", quietOn(store))
+            .put("xqReady", Quiet.ready()).put("xqErr", Quiet.why).put("xqWhy", store.getStr("xq_why") ?: "")
             // for the iPhone: a locked Android waits to be opened
             .put("hold", Unlock.secure(ctx) && !Unlock.has(ctx) && !(quietOn(store) && quietState(store) != "bad"))
             .put("busy", j != null && !j.done).put("line", Remote.state).put("smsApp", SmsApp.isDefault(ctx)).put("accounts", accs).put("list", history(store))
@@ -274,9 +277,12 @@ object Xfer {
             j.waitOpen = true
             j.log("مستني الموبايل يتفتح علشان يطلب الكود (فودافون بتسأل عن الرقم السري في شاشتها بس)")
             val auto = Unlock.has(app)
-            val msg = if (auto) "بيفتح قفل شاشة الأندرويد لوحده، ولسه مفيش حاجة اتبعتت لفودافون" else "مستني قفل شاشة الأندرويد يتفتح (بصمة أو باسورد)، ولسه مفيش حاجة اتبعتت لفودافون"
-            Thread { record(Store(app), j.id, JSONObject().put("msg", msg)); refresh(app) }.start()
-            if (j.from == "iphone" && !auto) tellIphone(app, Store(app), "⏳ التحويل مستني تفتح الأندرويد", "الأندرويد مقفول بباسورد. أول ما يتفتح التحويل هيكمل لوحده، أو احفظ رقم القفل في «محافظي» علشان يفتحه لوحده.", j.id)
+            val why = if (j.qWhy.isNotBlank()) "ماقدرش يحوّل من غير شاشة: ${j.qWhy}. " else ""
+            val msg = why + if (auto) "بيفتح قفل شاشة الأندرويد لوحده، ولسه مفيش حاجة اتبعتت لفودافون" else "مستني قفل شاشة الأندرويد يتفتح (بصمة أو باسورد)، ولسه مفيش حاجة اتبعتت لفودافون"
+            // the steps so far go to the iPhone now (not only at the end), so it sees why it waits
+            val steps = JSONArray(synchronized(j.trace) { j.trace.toList() })
+            Thread { record(Store(app), j.id, JSONObject().put("msg", msg).put("trace", steps)); refresh(app) }.start()
+            if (j.from == "iphone" && !auto) tellIphone(app, Store(app), "⏳ التحويل مستني تفتح الأندرويد", why + "الأندرويد مقفول بباسورد. أول ما يتفتح التحويل هيكمل لوحده.", j.id)
             waitOpen(app, j, System.currentTimeMillis())
             // our screen asks Android for the lock screen first, then the saved lock PIN is typed on it
             if (auto) main.postDelayed({ autoUnlock(app, j) }, 1800)
@@ -303,13 +309,14 @@ object Xfer {
     /** Starts talking to Vodafone with no screen; false = it can't here (nothing was sent), the screen way goes on. */
     private fun quietStart(app: Context, j: Job): Boolean {
         val store = Store(app)
-        if (!quietOn(store) || quietState(store) == "bad") return false
+        if (!quietOn(store)) { j.qWhy = "مفتاح «حوّل والأندرويد مقفول» مقفول في الإعدادات"; j.log(j.qWhy); return false }
+        if (quietState(store) == "bad") { j.qWhy = "فودافون مقبلتهاش قبل كده على الموبايل ده"; j.log(j.qWhy); return false }
         val sub = quietSub(app, j)
-        if (sub == null) { j.log("مقدرش يختار خط المحفظة من غير شاشة"); return false }
-        if (!Quiet.ready()) { j.log("الموبايل ده مش سامح يكلّم فودافون من غير شاشة (${Quiet.why})"); return false }
+        if (sub == null) { j.qWhy = "مقدرش يختار خط المحفظة"; j.log(j.qWhy); return false }
+        if (!Quiet.ready()) { j.qWhy = "الموبايل ده مش سامح يكلّم فودافون في الخلفية (${Quiet.why})"; j.log(j.qWhy); return false }
         j.quiet = true; j.qSub = sub
         Thread { record(store, j.id, JSONObject().put("msg", "الأندرويد مقفول، فبيكلّم فودافون من غير شاشة")); refresh(app) }.start()
-        if (!qSend(app, j, j.code, "طلب الكود من غير شاشة")) qOff(app, j, "مقدرش يطلب الكود من غير شاشة")
+        if (!qSend(app, j, j.code, "طلب الكود من غير شاشة")) qOff(app, j, "مقدرش يطلب الكود من غير شاشة (${Quiet.why})")
         return true
     }
 
@@ -345,6 +352,7 @@ object Xfer {
         if (j.pinSent) { end(app, j, "unsure", "$why بعد الرقم السري. استنى رسالة فودافون، هي اللي هتقول اتحوّل ولا لأ"); return }
         j.quiet = false; j.qGen++; j.qProbe = false
         j.confirmSent = false; j.pages.setLength(0); j.more = 0; j.seen = false; j.last = ""; j.lastNote = ""
+        j.qWhy = why
         j.log("$why، فهيكمّل بشاشة فودافون")
         screenWay(app, j)
     }
