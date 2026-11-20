@@ -5,9 +5,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.Parcelable
 import android.os.ResultReceiver
-import android.telephony.TelephonyManager
-import android.telephony.UssdResponse
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 import java.lang.reflect.Method
 
@@ -26,7 +25,9 @@ import java.lang.reflect.Method
  * this app only (HiddenApiBypass). If anything here is missing on this phone, [ready] says no and nothing is sent.
  */
 object Quiet {
-    private const val KEY = "USSD_RESPONSE"   // TelephonyManager.USSD_RESPONSE
+    // TelephonyManager.USSD_RESPONSE / USSD_RETURN_SUCCESS, and UssdResponse: hidden from apps' build kit, same values on every phone
+    private const val KEY = "USSD_RESPONSE"
+    private const val SUCCESS = 100
     private var tel: Any? = null
     private var call: Method? = null
     private var tried = false
@@ -60,11 +61,11 @@ object Quiet {
         val m = call ?: return false
         val rr = object : ResultReceiver(Handler(Looper.getMainLooper())) {
             override fun onReceiveResult(code: Int, data: Bundle?) {
-                val r: UssdResponse? = try {
-                    if (Build.VERSION.SDK_INT >= 33) data?.getParcelable(KEY, UssdResponse::class.java)
-                    else @Suppress("DEPRECATION") (data?.getParcelable(KEY) as? UssdResponse)
+                val text = try {
+                    @Suppress("DEPRECATION") val r = data?.getParcelable<Parcelable>(KEY)
+                    r?.javaClass?.getMethod("getReturnMessage")?.invoke(r)?.toString()
                 } catch (_: Throwable) { null }
-                done(code != TelephonyManager.USSD_RETURN_SUCCESS, r?.returnMessage?.toString())
+                done(code != SUCCESS, text)
             }
         }
         return try { m.invoke(tel, sub, s, rr); true } catch (_: Throwable) { false }
