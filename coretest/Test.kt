@@ -293,6 +293,62 @@ fun main() {
     check("quiet: wrong PIN talks about the PIN", Ussd.mentionsPin("عفواً، الرقم السري غير صحيح") && Ussd.mentionsPin(pinPage) && !Ussd.mentionsPin(donePage) && !Ussd.mentionsPin(page1))
     check("quiet: the same PIN question again after the PIN = stop", Ussd.step(pinPage, true, me, true, false, page1) == Ussd.Step.STOP)
 
+    // ---- the whole talk with no screen (QuietFlow): menu keys bare, typed values with "#", PIN only after "#" worked ----
+    fun sent(a: QuietFlow.Act) = (a as? QuietFlow.Act.Send)?.s
+    run {
+        val f = QuietFlow(me, 5, false)
+        check("flow: starts from the transfer menu", f.first() == "*9*7#")
+        check("flow: number box -> the number with #", sent(f.next("من فضلك ادخل رقم الموبايل", false)) == "$me#")
+        check("flow: amount box -> # worked, the amount with #", sent(f.next("ادخل المبلغ", false)) == "5#" && f.hashOk)
+        check("flow: real page 1 -> 0 bare (never 0#)", sent(f.next(quietPage1, false)) == "0")
+        check("flow: real PIN page -> the PIN", f.next(pinPage, false) == QuietFlow.Act.Pin && f.pinReply("123456") == "123456#")
+        f.pinDone()
+        val end = f.next(donePage, false)
+        check("flow: real done page -> done", end is QuietFlow.Act.End && end.st == "ok", end)
+    }
+    run {
+        val f = QuietFlow(me, 5, false)
+        f.next("ادخل رقم المحمول", true)
+        val a = f.next("عفوا الرقم الذي ادخالته غير صحيح", false)
+        check("flow: number with # refused -> off, # marked bad, no PIN", a is QuietFlow.Act.Off && f.hashBad && !f.pinSent)
+    }
+    run {
+        val f = QuietFlow(me, 5, false)
+        f.next("ادخل رقم المحمول", true)
+        val a = f.next("ادخل رقم المحمول", true)
+        check("flow: number asked again -> # bad", a is QuietFlow.Act.Off && f.hashBad)
+    }
+    run {
+        val f = QuietFlow(me, 5, false)
+        val a = f.next("رسالة Vodafone حدثت مشكلة في الاتصال أو رمز MMI غير صالح.", false)
+        check("flow: *9*7# not a menu -> the wallet menu *9#", sent(a) == "*9#")
+        check("flow: wallet menu -> the transfer key (not international / credit)", sent(f.next("1-شحن رصيد\n2-تحويل دولي\n3-تحويل أموال\n4-سحب", true)) == "3")
+        check("flow: then the number box", sent(f.next("ادخل رقم الموبايل", true)) == "$me#")
+    }
+    run {
+        val f = QuietFlow(me, 5, false)
+        check("flow: transfer not on the first menu page -> more (bare)", sent(f.next("1-شحن رصيد\n2-سحب\n0:مزيد", true)) == "0")
+        check("flow: … found on the next", sent(f.next("5-تحويل فلوس\n00:رجوع", true)) == "5")
+    }
+    run {
+        val f = QuietFlow(me, 5, false)
+        f.next("ادخل رقم المحمول", true); f.next("ادخل المبلغ", true); f.next(quietPage1, false)
+        check("flow: PIN page reached", f.next(pinPage, false) == QuietFlow.Act.Pin)
+        f.pinDone()
+        val a = f.next("عفواً، الرقم السري غير صحيح", false)
+        check("flow: wrong PIN after # -> fail, marked (never again this way)", a is QuietFlow.Act.End && f.pinRejected)
+    }
+    run {
+        val f = QuietFlow(me, 5, false)
+        // the code with number and amount (old way) gets the PIN page with no box tried first: no PIN
+        f.next("ادخل رقم المحمول", true)
+        val g = QuietFlow(me, 5, false)
+        val a = g.next(pinPage, false)
+        check("flow: PIN page before # was tried -> off, no PIN", a is QuietFlow.Act.Off && !g.pinSent)
+    }
+    check("flow: bare keys only 0-9 and 00 (a 2-digit 1x would be dialed)", QuietFlow.bare("0") == "0" && QuietFlow.bare("00") == "00" && QuietFlow.bare("10") == null && QuietFlow.bare("#") == null)
+    check("flow: number / amount boxes", QuietFlow.asksNumber("من فضلك ادخل رقم الموبايل") && QuietFlow.asksAmount("ادخل المبلغ") && !QuietFlow.asksNumber(pinPage) && !QuietFlow.asksAmount(pinPage))
+
     // ---- a question, even when it comes as a notification ----
     check("asks: PIN", Ussd.asks("لتأكيد تحويل 500 جنيه الى 01012345678 ادخل الرقم السري"))
     check("asks: confirm", Ussd.asks("سيتم تحويل 500 جنيه. للتأكيد اضغط 1"))

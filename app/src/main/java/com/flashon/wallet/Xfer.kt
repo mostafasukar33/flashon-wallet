@@ -32,6 +32,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.TextView
 import com.flashon.wallet.core.Parser
+import com.flashon.wallet.core.QuietFlow
 import com.flashon.wallet.core.RawSms
 import com.flashon.wallet.core.Ussd
 import com.flashon.wallet.core.Wallet
@@ -80,9 +81,9 @@ object Xfer {
         /** The SIM it talks on, and which answer it waits for (an older one, or its timeout, is dropped). */
         @Volatile var qSub = -1
         @Volatile var qGen = 0
-        /** The reply just sent is the first one with "#" after it on this phone: does Vodafone take it. */
-        @Volatile var qProbe = false
-        @Volatile var qPrev = ""
+        /** The talk with no screen, page by page, and the last string sent in it. */
+        @Volatile var flow: QuietFlow? = null
+        @Volatile var qLast = ""
         /** Why the talk with no screen didn't go (or didn't start), told to the iPhone right away. */
         @Volatile var qWhy = ""
         /** Times the code went again with no screen after a network hiccup. */
@@ -296,14 +297,21 @@ object Xfer {
 
     // ---------- with no screen: the phone locked with a password ----------
 
-    /** "" = not tried yet on this phone, "ok" = Vodafone took an answer with "#" after it, "bad" = it didn't (not again). */
-    fun quietState(store: Store): String = store.getStr("xq") ?: ""
+    /**
+     * "bad" = Vodafone didn't take a value typed with "#" (or the PIN with it): not again until the switch is turned
+     * off and on; "ok" = Vodafone took the number with "#" on this phone; "" = not known yet.
+     */
+    fun quietState(store: Store): String = when {
+        store.getStr("xq") == "bad" -> "bad"
+        store.getStr("xqh") == "ok" -> "ok"
+        else -> ""
+    }
     fun quietOn(store: Store) = store.getLong("xq_off") != 1L
 
     /** Turned on again from the settings: tried anew, even after a "bad". */
     fun setQuiet(store: Store, on: Boolean) {
         store.putLong("xq_off", if (on) 0 else 1)
-        if (on) { store.putStr("xq", ""); store.putStr("xq_why", ""); store.putLong("xq_pf", 0) }
+        if (on) { store.putStr("xq", ""); store.putStr("xq_why", ""); store.putStr("xqh", "") }
     }
 
     private fun quietBad(store: Store, why: String) { store.putStr("xq", "bad"); store.putStr("xq_why", why.take(300)) }
@@ -316,9 +324,10 @@ object Xfer {
         val sub = quietSub(app, j)
         if (sub == null) { j.qWhy = "مقدرش يختار خط المحفظة"; j.log(j.qWhy); return false }
         if (!Quiet.ready()) { j.qWhy = "الموبايل ده مش سامح يكلّم فودافون في الخلفية (${Quiet.why})"; j.log(j.qWhy); return false }
-        j.quiet = true; j.qSub = sub
+        val flow = QuietFlow(j.to, j.amount, quietState(store) == "ok")
+        j.quiet = true; j.qSub = sub; j.flow = flow
         Thread { record(store, j.id, JSONObject().put("msg", "الأندرويد مقفول، فبيكلّم فودافون من غير شاشة")); refresh(app) }.start()
-        if (!qSend(app, j, j.code, "طلب الكود من غير شاشة")) qOff(app, j, "مقدرش يطلب الكود من غير شاشة (${Quiet.why})")
+        if (!qSend(app, j, flow.first(), "طلب ${flow.first()} من غير شاشة")) qOff(app, j, "مقدرش يطلب الكود من غير شاشة (${Quiet.why})")
         return true
     }
 
@@ -335,6 +344,7 @@ object Xfer {
     /** Sends one string and waits for Vodafone's answer ([qPage]), [QUIET_WAIT] at most ([qLate]). */
     private fun qSend(app: Context, j: Job, s: String, what: String): Boolean {
         val gen = ++j.qGen
+        j.qLast = s
         j.log(what)
         val sent = Quiet.send(j.qSub, s) { asks, text -> if (job === j && !j.done && j.quiet && gen == j.qGen) qPage(app, j, asks, text) }
         if (sent) main.postDelayed({ if (job === j && !j.done && j.quiet && gen == j.qGen) qLate(app, j) }, QUIET_WAIT)
@@ -352,92 +362,48 @@ object Xfer {
      */
     private fun qOff(app: Context, j: Job, why: String) {
         if (j.pinSent) { end(app, j, "unsure", "$why بعد الرقم السري. استنى رسالة فودافون، هي اللي هتقول اتحوّل ولا لأ"); return }
-        j.quiet = false; j.qGen++; j.qProbe = false
+        j.quiet = false; j.qGen++; j.flow = null
         j.confirmSent = false; j.pages.setLength(0); j.more = 0; j.seen = false; j.last = ""; j.lastNote = ""
         j.qWhy = why
         j.log("$why، فهيكمّل بشاشة فودافون")
         screenWay(app, j)
     }
 
-    /** One of Vodafone's answers with no screen: the same rules as its screens ([Ussd.step]). */
+    /** One of Vodafone's answers with no screen: [QuietFlow] says what to do next. */
     private fun qPage(app: Context, j: Job, asks: Boolean, raw: String?) {
         val store = Store(app)
+        val flow = j.flow ?: return
         val text = (raw ?: "").trim()
         j.qGen++   // this answer came: its timeout is off
-        if (text.isBlank()) {
-            if (!j.pinSent) qOff(app, j, "فودافون مردتش بكلام من غير شاشة")
-            else end(app, j, "unsure", "فودافون مردتش بكلام بعد الرقم السري. استنى رسالة فودافون")
-            return
-        }
-        j.seen = true
-        j.log("فودافون: $text")
-        // "حدثت مشكلة في الاتصال أو رمز MMI غير صالح" to the code itself: the phone or the network dropped it before
-        // Vodafone saw it (the screen way gets it now and then too), so the code goes again, twice at most
-        if (!j.pinSent && !j.confirmSent && j.more == 0 && Ussd.glitch(text) && j.qRetries < 2) {
+        if (text.isNotEmpty()) { j.seen = true; j.log("فودافون: $text") }
+        // "حدثت مشكلة في الاتصال أو رمز MMI غير صالح" to a code (not an answer in the talk): the phone or the network
+        // dropped it before Vodafone saw it (the screen way gets it now and then too), so it goes again, twice at most
+        if (!j.pinSent && j.qLast.startsWith("*") && Ussd.glitch(text) && j.qRetries < 2) {
             j.qRetries++
+            val code = j.qLast
             main.postDelayed({
-                if (job === j && !j.done && j.quiet && !qSend(app, j, j.code, "مشكلة في الشبكة، طلب الكود تاني من غير شاشة (${j.qRetries})"))
+                if (job === j && !j.done && j.quiet && !qSend(app, j, code, "مشكلة في الشبكة، طلب $code تاني من غير شاشة (${j.qRetries})"))
                     qOff(app, j, "مقدرش يطلب الكود تاني من غير شاشة (${Quiet.why})")
             }, 3000L + 2000L * j.qRetries)
             return
         }
-        // Android may call a page that waits for an answer "finished": Vodafone's words decide
-        val question = Ussd.quietAsks(text, asks)
-        val step = Ussd.step(text, question, j.to, j.pinSent, j.confirmSent, j.pages.toString())
-        if (j.qProbe) {
-            j.qProbe = false
-            // the first answer sent with "#" after it: Vodafone moved on to a new page = it takes answers this way
-            val movedOn = text != j.qPrev && step in setOf(Ussd.Step.PIN, Ussd.Step.MORE, Ussd.Step.CONFIRM, Ussd.Step.OK)
-            if (!movedOn) {
-                // a network hiccup to the reply: tried again on the next transfers, three times in a row = not again
-                val tries = if (Ussd.glitch(text)) store.getLong("xq_pf") + 1 else 99L
-                store.putLong("xq_pf", tries)
-                if (tries >= 3) quietBad(store, "فودافون مقبلتش الرد من غير شاشة: $text")
-                qOff(app, j, "فودافون مقبلتش الرد من غير شاشة"); return
-            }
-            store.putLong("xq_pf", 0)
-            if (quietState(store) != "ok") { store.putStr("xq", "ok"); store.putStr("xq_why", "") }
-        }
-        j.qPrev = text
-        val wait = quietState(store) != "ok"
-        when (step) {
-            Ussd.Step.MORE -> {
-                val reply = Ussd.quietReply(Ussd.moreKey(text))
-                if (reply == null || j.more >= 4) { qOff(app, j, "فودافون سألت سؤال مش مفهوم من غير شاشة"); return }
-                j.more++; j.pages.append(text).append('\n')
-                j.qProbe = wait
-                if (!qSend(app, j, reply, "طلب باقي الرسالة ($reply)")) qOff(app, j, "مقدرش يرد من غير شاشة")
-            }
-            Ussd.Step.PIN -> {
-                // the PIN goes only after Vodafone took an answer with "#" on this phone (a menu key, never the PIN itself)
-                if (wait) { qOff(app, j, "فودافون سألت عن الرقم السري قبل ما يتأكد إنها بتقبل الرد من غير شاشة"); return }
+        val act = flow.next(text, asks)
+        if (flow.hashOk && store.getStr("xqh") != "ok") store.putStr("xqh", "ok")
+        when (act) {
+            is QuietFlow.Act.Send -> if (!qSend(app, j, act.s, act.what)) qOff(app, j, "مقدرش يرد من غير شاشة (${Quiet.why})")
+            is QuietFlow.Act.Pin -> {
                 val pin = j.takePin() ?: run { end(app, j, "stop", "الرقم السري اتمسح قبل ما يتكتب"); return }
-                val reply = Ussd.quietReply(pin) ?: run { end(app, j, "stop", "الرقم السري مش أرقام"); return }
-                j.pinSent = true
-                if (!qSend(app, j, reply, "بعت الرقم السري من غير شاشة")) end(app, j, "fail", "مقدرش يبعت الرقم السري لفودافون، فمفيش حاجة اتحوّلت")
+                val reply = flow.pinReply(pin) ?: run { end(app, j, "stop", "الرقم السري مش أرقام"); return }
+                j.pinSent = true; flow.pinDone()
+                if (!qSend(app, j, reply, "بعت الرقم السري بـ «#» من غير شاشة")) end(app, j, "fail", "مقدرش يبعت الرقم السري لفودافون، فمفيش حاجة اتحوّلت")
             }
-            Ussd.Step.CONFIRM -> {
-                j.confirmSent = true
-                j.qProbe = wait
-                if (!qSend(app, j, Ussd.quietReply("1")!!, "أكد بـ 1 من غير شاشة")) qOff(app, j, "مقدرش يرد من غير شاشة")
+            is QuietFlow.Act.End -> {
+                if (flow.pinRejected) quietBad(store, "فودافون قالت كده بعد الرقم السري من غير شاشة: ${act.text}")
+                end(app, j, act.st, act.text + if (flow.pinRejected) "\n(لو الرقم السري كان صح، يبقى فودافون مبتقبلش الرقم السري بـ «#»، واتقفل. تقدر تجرّبه تاني من الإعدادات)" else "")
             }
-            Ussd.Step.OK -> end(app, j, "ok", text)
-            Ussd.Step.UNSURE, Ussd.Step.WAIT -> if (j.pinSent) end(app, j, "unsure", text) else qOff(app, j, "رد فودافون من غير شاشة مش واضح (${if (asks) "سؤال" else "خلص"})")
-            Ussd.Step.FAIL, Ussd.Step.STOP -> {
-                val failed = step == Ussd.Step.FAIL || Ussd.step(text, false, j.to, j.pinSent, j.confirmSent) == Ussd.Step.FAIL
-                when {
-                    // after the PIN, Vodafone talks about the PIN (wrong, or asks it again): never again with no screen
-                    j.pinSent && Ussd.mentionsPin(text) -> {
-                        quietBad(store, "فودافون قالت كده بعد الرقم السري من غير شاشة: $text")
-                        end(app, j, "fail", text + "\n(لو الرقم السري كان صح، يبقى فودافون مبتقبلش الرد من غير شاشة، واتقفل. تقدر تجرّبه تاني من الإعدادات)")
-                    }
-                    !j.pinSent && (Ussd.glitch(text) || !failed) -> qOff(app, j, when {
-                        Ussd.glitch(text) && j.qRetries > 0 -> "الموبايل رجّع «مشكلة في الاتصال» ${j.qRetries + 1} مرات ورا بعض للطلب من غير شاشة"
-                        failed -> "مشكلة في الشبكة من غير شاشة"
-                        else -> "فودافون سألت سؤال مش مفهوم من غير شاشة"
-                    })
-                    else -> end(app, j, if (failed) "fail" else "stop", j.pages.toString() + text)
-                }
+            is QuietFlow.Act.Off -> {
+                if (flow.hashBad) quietBad(store, act.why)
+                qOff(app, j, act.why)
             }
         }
     }
