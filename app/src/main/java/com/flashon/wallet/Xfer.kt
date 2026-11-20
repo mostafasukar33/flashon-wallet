@@ -85,6 +85,8 @@ object Xfer {
         @Volatile var qPrev = ""
         /** Why the talk with no screen didn't go (or didn't start), told to the iPhone right away. */
         @Volatile var qWhy = ""
+        /** Times the code went again with no screen after a network hiccup. */
+        @Volatile var qRetries = 0
         @Volatile var last = ""
         @Volatile var lastNote = ""
         /** The pages already read of a message Vodafone cut in pages ("… 0:مزيد"), and how many. */
@@ -369,6 +371,16 @@ object Xfer {
         }
         j.seen = true
         j.log("فودافون: $text")
+        // "حدثت مشكلة في الاتصال أو رمز MMI غير صالح" to the code itself: the phone or the network dropped it before
+        // Vodafone saw it (the screen way gets it now and then too), so the code goes again, twice at most
+        if (!j.pinSent && !j.confirmSent && j.more == 0 && Ussd.glitch(text) && j.qRetries < 2) {
+            j.qRetries++
+            main.postDelayed({
+                if (job === j && !j.done && j.quiet && !qSend(app, j, j.code, "مشكلة في الشبكة، طلب الكود تاني من غير شاشة (${j.qRetries})"))
+                    qOff(app, j, "مقدرش يطلب الكود تاني من غير شاشة (${Quiet.why})")
+            }, 3000L + 2000L * j.qRetries)
+            return
+        }
         val step = Ussd.step(text, asks, j.to, j.pinSent, j.confirmSent, j.pages.toString())
         if (j.qProbe) {
             j.qProbe = false
@@ -413,7 +425,11 @@ object Xfer {
                         quietBad(store, "فودافون قالت كده بعد الرقم السري من غير شاشة: $text")
                         end(app, j, "fail", text + "\n(لو الرقم السري كان صح، يبقى فودافون مبتقبلش الرد من غير شاشة، واتقفل. تقدر تجرّبه تاني من الإعدادات)")
                     }
-                    !j.pinSent && (Ussd.glitch(text) || !failed) -> qOff(app, j, if (failed) "مشكلة في الشبكة من غير شاشة" else "فودافون سألت سؤال مش مفهوم من غير شاشة")
+                    !j.pinSent && (Ussd.glitch(text) || !failed) -> qOff(app, j, when {
+                        Ussd.glitch(text) && j.qRetries > 0 -> "الموبايل رجّع «مشكلة في الاتصال» ${j.qRetries + 1} مرات ورا بعض للطلب من غير شاشة"
+                        failed -> "مشكلة في الشبكة من غير شاشة"
+                        else -> "فودافون سألت سؤال مش مفهوم من غير شاشة"
+                    })
                     else -> end(app, j, if (failed) "fail" else "stop", j.pages.toString() + text)
                 }
             }
